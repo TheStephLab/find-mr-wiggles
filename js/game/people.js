@@ -80,7 +80,7 @@ const ROLE_CARRY = {
   staff: [[null, 3], ['phone', 1]],
 };
 
-export function createCrowdLook(rng, { role = 'commuter', decoyRate = 0, maxDecoyTraits = 0, uniform = null } = {}) {
+export function createCrowdLook(rng, { role = 'commuter', decoyRate = 0, maxDecoyTraits = 0, paletteBias = 0, uniform = null } = {}) {
   const child = role === 'child';
   const elderly = role === 'elderly';
   const look = {
@@ -132,10 +132,42 @@ export function createCrowdLook(rng, { role = 'commuter', decoyRate = 0, maxDeco
   }
   if (look.carry) look.carry = typeof look.carry === 'string' ? { type: look.carry, color: rng.pick(CLOTHES) } : look.carry;
 
+  if (!uniform && paletteBias > 0) applyPaletteBias(look, rng, paletteBias);
   if (uniform) applyUniform(look, uniform, rng);
 
   if (!uniform && maxDecoyTraits > 0 && rng.chance(decoyRate)) applyDecoy(look, rng, maxDecoyTraits);
   return look;
+}
+
+const WIGGLES_PALETTE = [COLOURS.wigglesTeal, COLOURS.wigglesOrange, COLOURS.wigglesYellow, COLOURS.wigglesGreen, '#7d4bb3', '#4aa3c9', COLOURS.wigglesOlive];
+
+/**
+ * Dress some of the crowd in Mr. Wiggles' colours and busier patterns so he
+ * doesn't stand out at a glance. None of this adds one of his signature traits.
+ */
+function applyPaletteBias(look, rng, bias) {
+  if (rng.chance(bias)) {
+    look.top.color = rng.pick(WIGGLES_PALETTE);
+    look.top.color2 = rng.pick(WIGGLES_PALETTE);
+    if (look.top.type === 'dress') look.bottom.color = look.top.color;
+    if (rng.chance(0.55)) look.top.pattern = rng.pick(['stripes', 'dots', 'stripes']);
+  }
+  if (rng.chance(bias * 0.7)) {
+    look.hat = { type: rng.pick(['beanie', 'bowler', 'beanie', 'sun', 'cap']), color: rng.pick(WIGGLES_PALETTE), color2: rng.pick(WIGGLES_PALETTE) };
+  }
+  if (rng.chance(bias * 0.5)) {
+    const colours = rng.shuffle(WIGGLES_PALETTE).slice(0, rng.int(1, 3));
+    look.scarf = { colors: colours };
+  }
+  if (look.role !== 'elderly' && rng.chance(bias * 0.3)) {
+    look.hair = { style: rng.pick(['curly', 'curly', 'long', 'spiky']), color: rng.pick(['#c45ab3', '#e05a4f', '#4aa3c9', '#e98a3a', '#3fa66b']) };
+  }
+  if (rng.chance(bias * 0.35)) {
+    const rim = rng.pick([COLOURS.wigglesTeal, '#b5652a', '#7d4bb3']);
+    look.glasses = { left: rim, right: rim };
+  }
+  if (rng.chance(bias * 0.25)) look.bottom = { ...look.bottom, color: COLOURS.wigglesOlive };
+  if (look.role !== 'child' && rng.chance(bias * 0.12) && !look.carry) look.carry = { type: 'cane', color: '#5a3a1e' };
 }
 
 /** Uniform presets used by scenes for staff (station staff, pilots, cleaners …). */

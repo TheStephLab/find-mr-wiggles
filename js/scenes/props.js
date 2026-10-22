@@ -1,9 +1,25 @@
 /**
- * Reusable prop drawings shared by scenes. Every function draws in world
- * units. Keep them cheap: they may run every frame when the player zooms in.
+ * Reusable prop drawings shared by scenes. 2D helpers draw flat artwork
+ * (signs, shop fronts); the 3D props take the projection `P` and a ground
+ * height `z`. Keep them cheap: they run every frame when on screen.
  */
+import { drawBox, onFront, poly, sideQuad, topQuad, shadow } from './draw3d.js';
+
 export const OUT = '#2a2230';
-export const FONT = '"Trebuchet MS", "Segoe UI", system-ui, sans-serif';
+export const FONT = '"Grandstander", "Trebuchet MS", "Segoe UI", system-ui, sans-serif';
+
+const shadeCache = new Map();
+export function shade(hex, amount) {
+  const key = hex + amount;
+  if (shadeCache.has(key)) return shadeCache.get(key);
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const n = parseInt(h, 16);
+  const f = (c) => Math.max(0, Math.min(255, Math.round(amount < 0 ? c * (1 + amount) : c + (255 - c) * amount)));
+  const out = `rgb(${f((n >> 16) & 255)},${f((n >> 8) & 255)},${f(n & 255)})`;
+  shadeCache.set(key, out);
+  return out;
+}
 
 export function rrect(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -23,6 +39,18 @@ export function box(ctx, x, y, w, h, fill, stroke = OUT, lw = 1, r = 0) {
 }
 
 export function text(ctx, str, x, y, { size = 12, colour = '#222', align = 'center', weight = 'bold', baseline = 'middle', maxWidth } = {}) {
+  // Text is the most expensive thing to rasterise: below ~3.5px tall it reads as a smudge anyway.
+  const m = ctx.getTransform();
+  const px = size * Math.hypot(m.a, m.b);
+  if (px < 3.5) {
+    const w = Math.min(maxWidth ?? Infinity, str.length * size * 0.55);
+    const x0 = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
+    ctx.globalAlpha *= 0.55;
+    ctx.fillStyle = colour;
+    ctx.fillRect(x0, y - size * 0.3, w, size * 0.6);
+    ctx.globalAlpha /= 0.55;
+    return;
+  }
   ctx.font = `${weight} ${size}px ${FONT}`;
   ctx.fillStyle = colour;
   ctx.textAlign = align;
@@ -30,7 +58,7 @@ export function text(ctx, str, x, y, { size = 12, colour = '#222', align = 'cent
   ctx.fillText(str, x, y, maxWidth);
 }
 
-/** Checkerboard tiles, only for the visible part of `rect`. */
+/** Checkerboard tiles (flat floor), only for the visible part of `rect`. */
 export function tiles(ctx, rect, size, c1, c2, view = rect) {
   ctx.fillStyle = c1;
   ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
@@ -66,93 +94,7 @@ export function gridLines(ctx, rect, size, colour, view = rect, lw = 1) {
   ctx.stroke();
 }
 
-// --------------------------------------------------------------- furniture
-export function bench(ctx, x, y, w, facing = 'down', wood = '#a8723f') {
-  const legs = '#4a4a4a';
-  if (facing === 'down') {
-    box(ctx, x + 1, y - 24, w - 2, 9, wood, OUT, 0.8, 2);
-    ctx.fillStyle = legs;
-    ctx.fillRect(x + 3, y - 15, 2, 6);
-    ctx.fillRect(x + w - 5, y - 15, 2, 6);
-  }
-  box(ctx, x, y - 12, w, 5, shade(wood, 0.15), OUT, 0.8, 1.5);
-  box(ctx, x, y - 7, w, 3, shade(wood, -0.2), OUT, 0.6);
-  ctx.fillStyle = legs;
-  ctx.fillRect(x + 3, y - 4, 2.4, 4);
-  ctx.fillRect(x + w - 5.4, y - 4, 2.4, 4);
-  if (facing === 'up') {
-    box(ctx, x + 1, y - 21, w - 2, 10, wood, OUT, 0.8, 2);
-  }
-}
-
-export function plant(ctx, x, y, size = 1, leaf = '#3f8f4a') {
-  ctx.fillStyle = 'rgba(0,0,0,0.15)';
-  ctx.beginPath();
-  ctx.ellipse(x, y, 11 * size, 3.5 * size, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(x - 9 * size, y - 16 * size);
-  ctx.lineTo(x + 9 * size, y - 16 * size);
-  ctx.lineTo(x + 7 * size, y);
-  ctx.lineTo(x - 7 * size, y);
-  ctx.closePath();
-  ctx.fillStyle = '#b76b3e';
-  ctx.fill();
-  ctx.strokeStyle = OUT;
-  ctx.lineWidth = 0.8;
-  ctx.stroke();
-  const blobs = [[0, -34, 11], [-9, -27, 8], [9, -27, 8], [-5, -42, 7], [6, -40, 7]];
-  for (const [dx, dy, r] of blobs) {
-    ctx.beginPath();
-    ctx.arc(x + dx * size, y + dy * size, r * size, 0, Math.PI * 2);
-    ctx.fillStyle = leaf;
-    ctx.fill();
-    ctx.strokeStyle = shade(leaf, -0.35);
-    ctx.lineWidth = 0.7;
-    ctx.stroke();
-  }
-  ctx.fillStyle = shade(leaf, 0.25);
-  ctx.beginPath();
-  ctx.arc(x - 3 * size, y - 37 * size, 3 * size, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-export function pillar(ctx, x, y, h = 110, w = 18, colour = '#cfc6b4') {
-  ctx.fillStyle = 'rgba(0,0,0,0.15)';
-  ctx.fillRect(x - w / 2 - 2, y - 3, w + 10, 6);
-  box(ctx, x - w / 2, y - h, w, h, colour, OUT, 1);
-  ctx.fillStyle = shade(colour, -0.15);
-  ctx.fillRect(x + w / 2 - 5, y - h, 4, h);
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
-  ctx.fillRect(x - w / 2 + 3, y - h, 3, h);
-  box(ctx, x - w / 2 - 3, y - 8, w + 6, 8, shade(colour, -0.1), OUT, 0.8);
-  box(ctx, x - w / 2 - 3, y - h, w + 6, 7, shade(colour, -0.1), OUT, 0.8);
-}
-
-export function bin(ctx, x, y, colour = '#2f6b45') {
-  box(ctx, x - 6, y - 16, 12, 16, colour, OUT, 0.8, 2);
-  box(ctx, x - 7, y - 18, 14, 3, shade(colour, 0.2), OUT, 0.6, 1);
-}
-
-export function machine(ctx, x, y, w, h, colour, screen = '#7fd0f0', label = '') {
-  box(ctx, x, y - h, w, h, colour, OUT, 1, 2);
-  box(ctx, x + 4, y - h + 6, w - 8, h * 0.32, screen, OUT, 0.6, 1);
-  ctx.fillStyle = 'rgba(255,255,255,0.4)';
-  ctx.fillRect(x + 6, y - h + 8, (w - 12) * 0.4, 2);
-  ctx.fillStyle = '#222';
-  ctx.fillRect(x + w / 2 - 5, y - h * 0.4, 10, 2);
-  ctx.fillRect(x + 5, y - 14, w - 10, 6);
-  if (label) text(ctx, label, x + w / 2, y - h - 6, { size: 7, colour: '#222' });
-}
-
-export function lampPost(ctx, x, y, h = 70, colour = '#2f3b4a') {
-  ctx.fillStyle = colour;
-  ctx.fillRect(x - 1.5, y - h, 3, h);
-  box(ctx, x - 4, y - 4, 8, 4, colour, null);
-  box(ctx, x - 6, y - h - 8, 12, 9, '#f6e7a7', OUT, 0.8, 3);
-}
-
-/** Analogue clock that shows the real local time. */
+/** Analogue clock that shows the real local time (flat; use inside onFront). */
 export function clockFace(ctx, cx, cy, r, now = new Date()) {
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -172,58 +114,149 @@ export function clockFace(ctx, cx, cy, r, now = new Date()) {
     ctx.lineWidth = w;
     ctx.stroke();
   };
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2;
-    ctx.fillStyle = '#3a2e1e';
-    ctx.fillRect(cx + Math.sin(a) * r * 0.78 - 0.5, cy - Math.cos(a) * r * 0.78 - 0.5, 1, 1);
-  }
   hand(((h + m / 60) / 12) * Math.PI * 2, r * 0.5, r * 0.12, '#222');
   hand((m / 60) * Math.PI * 2, r * 0.75, r * 0.08, '#222');
   hand((s / 60) * Math.PI * 2, r * 0.8, r * 0.04, '#c0392b');
 }
 
-/** Free-standing kiosk drawn in two depth-sorted parts so a keeper can stand inside. */
-export function kioskBack(ctx, k) {
-  const { x, y, w, colour, colour2, name } = k;
-  box(ctx, x, y - 46, w, 46, shade(colour, -0.25), OUT, 1);
-  // shelves with goods
-  for (let row = 0; row < 2; row++) {
-    const sy = y - 40 + row * 15;
-    ctx.fillStyle = '#7a5a3a';
-    ctx.fillRect(x + 4, sy + 10, w - 8, 2);
-    goods(ctx, k.goods, x + 6, sy, w - 12, 10, row);
-  }
-  // awning
-  const ay = y - 62;
-  const stripes = Math.max(4, Math.round(w / 12));
-  for (let i = 0; i < stripes; i++) {
-    ctx.fillStyle = i % 2 ? colour2 : '#ffffff';
-    ctx.fillRect(x - 4 + (i * (w + 8)) / stripes, ay, (w + 8) / stripes + 0.5, 12);
-  }
-  ctx.beginPath();
-  for (let i = 0; i < stripes; i++) {
-    const sx = x - 4 + (i * (w + 8)) / stripes;
-    const sw = (w + 8) / stripes;
-    ctx.moveTo(sx, ay + 12);
-    ctx.arc(sx + sw / 2, ay + 12, sw / 2, Math.PI, 0, true);
-  }
-  ctx.fillStyle = colour2;
-  ctx.fill();
-  ctx.strokeStyle = OUT;
-  ctx.lineWidth = 0.8;
-  ctx.strokeRect(x - 4, ay, w + 8, 12);
-  box(ctx, x + w / 2 - Math.min(w * 0.45, 44), ay - 15, Math.min(w * 0.9, 88), 13, colour, OUT, 0.8, 3);
-  text(ctx, name, x + w / 2, ay - 8.5, { size: 8, colour: '#fff', maxWidth: Math.min(w * 0.85, 84) });
+// --------------------------------------------------------------- 3D furniture
+/** Bench whose seat spans x..x+w at depth y-8..y, with a slatted backrest. */
+export function bench3d(ctx, P, x, y, w, facing, wood, z) {
+  shadow(ctx, P, x, y - 8, w, 8, z);
+  for (const lx of [x + 3, x + w - 6]) drawBox(ctx, P, { x: lx, y: y - 7, w: 3, d: 6, h: 9, z }, { front: '#4a4a4a', stroke: null });
+  const backrest = (by) => {
+    for (const px of [x + 2, x + w - 5]) drawBox(ctx, P, { x: px, y: by, w: 3, d: 2, h: 22, z: z + 9 }, { front: '#4a4a4a', stroke: null });
+    for (const sz of [z + 17, z + 25]) drawBox(ctx, P, { x, y: by, w, d: 2, h: 5, z: sz }, { front: wood, lw: 0.6 });
+  };
+  if (facing === 'down') backrest(y - 9);
+  drawBox(ctx, P, { x, y: y - 8, w, d: 8, h: 3, z: z + 9 }, { front: shade(wood, -0.15), top: shade(wood, 0.15) });
+  if (facing === 'up') backrest(y - 0.5);
 }
 
-export function kioskFront(ctx, k) {
+/** Potted plant: a 3D pot with a camera-facing bush. */
+export function plant3d(ctx, P, x, y, size, leaf, z) {
+  const r = 9 * size;
+  shadow(ctx, P, x - r, y - r * 0.6, r * 2, r * 1.2, z);
+  drawBox(ctx, P, { x: x - r * 0.8, y: y - r * 0.6, w: r * 1.6, d: r * 1.2, h: 15 * size, z }, { front: '#b76b3e' });
+  onFront(ctx, P, x, y, z, (c) => {
+    const blobs = [[0, -36, 11], [-9, -28, 8], [9, -28, 8], [-5, -44, 7], [6, -42, 7]];
+    for (const [dx, dy, rr] of blobs) {
+      c.beginPath();
+      c.arc(dx * size, dy * size, rr * size, 0, Math.PI * 2);
+      c.fillStyle = leaf;
+      c.fill();
+      c.strokeStyle = shade(leaf, -0.35);
+      c.lineWidth = 0.7;
+      c.stroke();
+    }
+    c.fillStyle = shade(leaf, 0.3);
+    c.beginPath();
+    c.arc(-3 * size, -39 * size, 3 * size, 0, Math.PI * 2);
+    c.fill();
+  });
+}
+
+export function pillar3d(ctx, P, x, y, h, w, colour, z) {
+  const half = w / 2;
+  shadow(ctx, P, x - half, y - half, w, w, z, 0.2);
+  drawBox(ctx, P, { x: x - half - 3, y: y - half - 3, w: w + 6, d: w + 6, h: 8, z }, { front: shade(colour, -0.08) });
+  drawBox(ctx, P, { x: x - half, y: y - half, w, d: w, h, z }, { front: colour, top: shade(colour, 0.2) });
+  onFront(ctx, P, x - half, y + half, z, (c) => {
+    c.fillStyle = 'rgba(255,255,255,0.35)';
+    c.fillRect(3, -h, 3, h - 8);
+    c.fillStyle = 'rgba(0,0,0,0.08)';
+    c.fillRect(w - 6, -h, 4, h - 8);
+  });
+  drawBox(ctx, P, { x: x - half - 3, y: y - half - 3, w: w + 6, d: w + 6, h: 7, z: z + h - 7 }, { front: shade(colour, -0.08) });
+}
+
+export function bin3d(ctx, P, x, y, colour, z) {
+  drawBox(ctx, P, { x: x - 6, y: y - 6, w: 12, d: 10, h: 16, z }, { front: colour });
+  drawBox(ctx, P, { x: x - 7, y: y - 7, w: 14, d: 12, h: 2, z: z + 16 }, { front: shade(colour, 0.2) });
+}
+
+export function machine3d(ctx, P, x, y, w, h, colour, screen, label, z) {
+  shadow(ctx, P, x, y - 12, w, 12, z);
+  drawBox(ctx, P, { x, y: y - 12, w, d: 12, h, z }, { front: colour });
+  onFront(ctx, P, x, y, z, (c) => {
+    box(c, 4, -h + 6, w - 8, h * 0.32, screen, OUT, 0.6, 1);
+    c.fillStyle = 'rgba(255,255,255,0.45)';
+    c.fillRect(6, -h + 8, (w - 12) * 0.4, 2);
+    c.fillStyle = '#222';
+    c.fillRect(w / 2 - 5, -h * 0.4, 10, 2);
+    c.fillRect(5, -14, w - 10, 6);
+    if (label) text(c, label, w / 2, -h - 6, { size: 7, colour: '#222' });
+  });
+}
+
+export function lampPost3d(ctx, P, x, y, h, colour, z) {
+  onFront(ctx, P, x, y, z, (c) => {
+    c.fillStyle = 'rgba(0,0,0,0.15)';
+    c.beginPath();
+    c.ellipse(0, 0, 6, 2, 0, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = colour;
+    c.fillRect(-1.5, -h, 3, h);
+    box(c, -4, -5, 8, 5, colour, null);
+    box(c, -6, -h - 9, 12, 10, '#f6e7a7', OUT, 0.8, 3);
+  });
+}
+
+/** Free-standing kiosk. Back unit (with shelves and awning) and the counter are separate sorted parts. */
+export function kioskBack3d(ctx, P, k, z) {
+  const { x, y, w, d, colour, colour2, name } = k;
+  shadow(ctx, P, x, y - 6, w, d + 6, z);
+  drawBox(ctx, P, { x, y: y - 6, w, d: 6, h: 50, z }, { front: shade(colour, -0.25) });
+  onFront(ctx, P, x, y, z, (c) => {
+    for (let row = 0; row < 2; row++) {
+      const sy = -44 + row * 16;
+      c.fillStyle = '#7a5a3a';
+      c.fillRect(4, sy + 11, w - 8, 2);
+      goods(c, k.goods, 6, sy, w - 12, 11, row);
+    }
+  });
+  // side panels
+  drawBox(ctx, P, { x, y, w: 3, d: d - 8, h: 50, z }, { front: shade(colour, -0.1) });
+  drawBox(ctx, P, { x: x + w - 3, y, w: 3, d: d - 8, h: 50, z }, { front: shade(colour, -0.1) });
+  // sloped, striped awning
+  const stripes = Math.max(4, Math.round(w / 12));
+  const yb = y - 8;
+  const yf = y + d * 0.55;
+  for (let i = 0; i < stripes; i++) {
+    const x0 = x - 5 + (i * (w + 10)) / stripes;
+    const x1 = x - 5 + ((i + 1) * (w + 10)) / stripes;
+    poly(ctx, [P.pt(x0, yb, z + 66), P.pt(x1, yb, z + 66), P.pt(x1, yf, z + 55), P.pt(x0, yf, z + 55)], i % 2 ? colour2 : '#ffffff', null);
+  }
+  poly(ctx, [P.pt(x - 5, yb, z + 66), P.pt(x + w + 5, yb, z + 66), P.pt(x + w + 5, yf, z + 55), P.pt(x - 5, yf, z + 55)], null, OUT, 0.8);
+  onFront(ctx, P, x - 5, yf, z + 55, (c) => {
+    const sw = (w + 10) / stripes;
+    c.beginPath();
+    for (let i = 0; i < stripes; i++) {
+      c.moveTo(i * sw, 0);
+      c.arc(i * sw + sw / 2, 0, sw / 2, Math.PI, 0, true);
+    }
+    c.fillStyle = colour2;
+    c.fill();
+    c.strokeStyle = OUT;
+    c.lineWidth = 0.6;
+    c.stroke();
+  });
+  onFront(ctx, P, x + w / 2, yb, z + 66, (c) => {
+    const bw = Math.min(w * 0.9, 88);
+    box(c, -bw / 2, -15, bw, 14, colour, OUT, 0.8, 3);
+    text(c, name, 0, -8, { size: 8, colour: '#fff', maxWidth: bw - 6 });
+  });
+}
+
+export function kioskFront3d(ctx, P, k, z) {
   const { x, y, w, d, colour } = k;
   const fy = y + d;
-  box(ctx, x - 2, fy - 22, w + 4, 5, '#f3eadb', OUT, 0.8, 1);
-  box(ctx, x, fy - 17, w, 17, colour, OUT, 1);
-  ctx.fillStyle = 'rgba(255,255,255,0.18)';
-  for (let i = 1; i < 4; i++) ctx.fillRect(x + (i * w) / 4 - 1, fy - 15, 2, 13);
-  goods(ctx, k.goods, x + 4, fy - 30, w - 8, 8, 2);
+  drawBox(ctx, P, { x, y: fy - 8, w, d: 8, h: 18, z }, { front: colour, top: '#f3eadb' });
+  onFront(ctx, P, x, fy, z, (c) => {
+    c.fillStyle = 'rgba(255,255,255,0.18)';
+    for (let i = 1; i < 4; i++) c.fillRect((i * w) / 4 - 1, -16, 2, 13);
+  });
+  onFront(ctx, P, x + 4, fy - 4, z + 18, (c) => goods(c, k.goods, 0, -8, w - 8, 8, 2));
 }
 
 function goods(ctx, type, x, y, w, h, row) {
@@ -274,98 +307,119 @@ function goods(ctx, type, x, y, w, h, row) {
 }
 
 // --------------------------------------------------------------- stairways
-export function drawEscalator(ctx, rect, dir, t) {
-  const { x, y, w, h } = rect;
-  box(ctx, x - 4, y, w + 8, h, '#5b6470', OUT, 1, 3);
-  ctx.fillStyle = '#c9ced6';
-  ctx.fillRect(x + 1, y + 4, w - 2, h - 8);
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x + 1, y + 4, w - 2, h - 8);
-  ctx.clip();
-  ctx.strokeStyle = '#8c939e';
-  ctx.lineWidth = 1.2;
+/** Escalator rising from (yBottom, zBottom) at the near end to (yTop, zTop) at the far end. */
+export function drawEscalator(ctx, P, rect, dir, zTop, zBottom, t) {
+  const { x, y: y0, w, h } = rect;
+  const y1 = y0 + h;
+  const xl = x - 5;
+  const xr = x + w + 5;
+  const band = (bx) => poly(ctx, [P.pt(bx, y0 - 8, zTop + 13), P.pt(bx, y1 + 6, zBottom + 13), P.pt(bx, y1 + 6, zBottom), P.pt(bx, y0 - 8, zTop - 10)], '#5b6470', '#2a2230', 0.8);
+  // far side panel first, then the steps, then the panel nearest the camera's centre line
+  const farSide = x + w / 2 < P.cx ? xl : xr;
+  const nearSide = farSide === xl ? xr : xl;
+  band(farSide);
+  poly(ctx, [P.pt(x, y0 - 6, zTop), P.pt(x + w, y0 - 6, zTop), P.pt(x + w, y1 + 4, zBottom), P.pt(x, y1 + 4, zBottom)], '#c9ced6', '#5b6470', 0.8);
   const gap = 6;
   const offset = ((t * 30) % gap) * (dir === 'up' ? -1 : 1);
+  ctx.strokeStyle = '#8c939e';
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  for (let yy = y + offset - gap; yy < y + h + gap; yy += gap) {
-    ctx.moveTo(x + 1, yy);
-    ctx.lineTo(x + w - 1, yy);
+  for (let yy = y0 + ((offset % gap) + gap) % gap; yy < y1; yy += gap) {
+    const zz = zTop + ((yy - y0) / h) * (zBottom - zTop);
+    const a = P.pt(x, yy, zz);
+    const b = P.pt(x + w, yy, zz);
+    ctx.moveTo(a[0], a[1]);
+    ctx.lineTo(b[0], b[1]);
   }
   ctx.stroke();
-  ctx.restore();
-  ctx.fillStyle = '#1d1f24';
-  ctx.fillRect(x - 4, y, 3, h);
-  ctx.fillRect(x + w + 1, y, 3, h);
-  ctx.fillStyle = '#e2b007';
-  ctx.fillRect(x + 1, y + 2, w - 2, 2);
-  ctx.fillRect(x + 1, y + h - 4, w - 2, 2);
-  // direction arrow
-  const ay = dir === 'up' ? y + h - 14 : y + 14;
-  ctx.fillStyle = 'rgba(30,140,60,0.85)';
-  ctx.beginPath();
-  if (dir === 'up') {
-    ctx.moveTo(x + w / 2, ay - 6);
-    ctx.lineTo(x + w / 2 + 5, ay + 2);
-    ctx.lineTo(x + w / 2 - 5, ay + 2);
-  } else {
-    ctx.moveTo(x + w / 2, ay + 6);
-    ctx.lineTo(x + w / 2 + 5, ay - 2);
-    ctx.lineTo(x + w / 2 - 5, ay - 2);
+  for (const [yy, zz] of [[y0 - 6, zTop], [y1 + 4, zBottom]]) {
+    const a = P.pt(x, yy, zz);
+    const b = P.pt(x + w, yy, zz);
+    ctx.strokeStyle = '#e2b007';
+    ctx.lineWidth = 2 * P.s(yy);
+    ctx.beginPath();
+    ctx.moveTo(a[0], a[1]);
+    ctx.lineTo(b[0], b[1]);
+    ctx.stroke();
   }
-  ctx.fill();
+  band(nearSide);
+  for (const hx of [xl, xr]) {
+    const a = P.pt(hx, y0 - 8, zTop + 14);
+    const b = P.pt(hx, y1 + 6, zBottom + 14);
+    ctx.strokeStyle = '#1d1f24';
+    ctx.lineWidth = 3 * P.s(y1);
+    ctx.beginPath();
+    ctx.moveTo(a[0], a[1]);
+    ctx.lineTo(b[0], b[1]);
+    ctx.stroke();
+  }
+  const arrowY = dir === 'up' ? y1 - 12 : y0 + 12;
+  const arrowZ = zTop + ((arrowY - y0) / h) * (zBottom - zTop);
+  onFront(ctx, P, x + w / 2, arrowY, arrowZ, (c) => {
+    c.fillStyle = 'rgba(30,140,60,0.9)';
+    c.beginPath();
+    if (dir === 'up') {
+      c.moveTo(0, -7);
+      c.lineTo(5, 0);
+      c.lineTo(-5, 0);
+    } else {
+      c.moveTo(0, 0);
+      c.lineTo(5, -7);
+      c.lineTo(-5, -7);
+    }
+    c.fill();
+  });
 }
 
-export function drawTravelator(ctx, rect, dir, t) {
+export function drawTravelator(ctx, P, rect, dir, z, t) {
   const { x, y, w, h } = rect;
-  box(ctx, x, y, w, h, '#5b6470', OUT, 1, 4);
-  ctx.fillStyle = '#7d8590';
-  ctx.fillRect(x + 4, y + 4, w - 8, h - 8);
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x + 4, y + 4, w - 8, h - 8);
-  ctx.clip();
-  ctx.strokeStyle = '#9aa2ad';
-  ctx.lineWidth = 1;
-  const gap = 5;
+  drawBox(ctx, P, { x, y, w, d: h, h: 3, z }, { front: '#5b6470', top: '#7d8590' });
+  const gap = 6;
   const offset = ((t * 42) % gap) * (dir === 'right' ? 1 : -1);
+  ctx.strokeStyle = '#9aa2ad';
+  ctx.lineWidth = 0.8;
   ctx.beginPath();
-  for (let xx = x + offset - gap; xx < x + w + gap; xx += gap) {
-    ctx.moveTo(xx, y + 4);
-    ctx.lineTo(xx, y + h - 4);
+  for (let xx = x + 4 + ((offset % gap) + gap) % gap; xx < x + w - 4; xx += gap) {
+    const a = P.pt(xx, y + 3, z + 3);
+    const b = P.pt(xx, y + h - 3, z + 3);
+    ctx.moveTo(a[0], a[1]);
+    ctx.lineTo(b[0], b[1]);
   }
   ctx.stroke();
-  ctx.restore();
-  ctx.fillStyle = '#1d1f24';
-  ctx.fillRect(x, y, w, 3);
-  ctx.fillRect(x, y + h - 3, w, 3);
-  ctx.fillStyle = '#e2b007';
-  const ex = dir === 'right' ? x + 4 : x + w - 6;
-  ctx.fillRect(ex, y + 4, 2, h - 8);
+  drawBox(ctx, P, { x, y: y - 2, w, d: 3, h: 13, z }, { front: '#3b4250', top: '#1d1f24' });
+  drawBox(ctx, P, { x, y: y + h - 1, w, d: 3, h: 13, z }, { front: '#3b4250', top: '#1d1f24' });
+  const ex = dir === 'right' ? x + 3 : x + w - 5;
+  topQuad(ctx, P, ex, y + 2, 2, h - 3, z + 3.2, '#e2b007');
 }
 
 /** Queue barrier posts with belts between consecutive points. */
-export function stanchions(ctx, points, belt = '#c0392b') {
+export function stanchions3d(ctx, P, points, belt, z) {
   ctx.strokeStyle = belt;
-  ctx.lineWidth = 1.6;
   ctx.beginPath();
-  points.forEach(([px, py], i) => (i ? ctx.lineTo(px, py - 9) : ctx.moveTo(px, py - 9)));
+  points.forEach(([px, py], i) => {
+    const [sx, sy] = P.pt(px, py, z + 9);
+    if (i) ctx.lineTo(sx, sy);
+    else ctx.moveTo(sx, sy);
+  });
+  ctx.lineWidth = 1.6 * P.s(points[0][1]);
   ctx.stroke();
   for (const [px, py] of points) {
-    ctx.fillStyle = '#9aa0a8';
-    ctx.fillRect(px - 0.9, py - 11, 1.8, 11);
-    ctx.fillStyle = '#555';
-    ctx.beginPath();
-    ctx.ellipse(px, py, 3, 1.2, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(px, py - 11, 1.4, 0, Math.PI * 2);
-    ctx.fill();
+    onFront(ctx, P, px, py, z, (c) => {
+      c.fillStyle = '#9aa0a8';
+      c.fillRect(-0.9, -11, 1.8, 11);
+      c.fillStyle = '#555';
+      c.beginPath();
+      c.ellipse(0, 0, 3, 1.2, 0, 0, Math.PI * 2);
+      c.fill();
+      c.beginPath();
+      c.arc(0, -11, 1.4, 0, Math.PI * 2);
+      c.fill();
+    });
   }
 }
 
-/** Little pecking birds that scatter around a point. */
-export function createPigeons(rng, cx, cy, count, spread = 60) {
+/** Little pecking birds around a point (drawn under people). */
+export function createPigeons(rng, P, cx, cy, count, spread, z) {
   const birds = Array.from({ length: count }, () => ({
     x: cx + rng.range(-spread, spread),
     y: cy + rng.range(-spread / 2, spread / 2),
@@ -376,16 +430,14 @@ export function createPigeons(rng, cx, cy, count, spread = 60) {
     peck: rng.range(0, 10),
   }));
   return {
-    bounds: { x: cx - spread - 30, y: cy - spread - 30, w: spread * 2 + 60, h: spread + 60 },
+    bounds: { x: P.X(cx - spread - 20, cy + spread) - 20, y: P.Y(cy - spread, z) - 20, w: spread * 2 + 80, h: spread + 60 },
     update(dt) {
       for (const b of birds) {
         b.hop -= dt;
         if (b.hop <= 0) {
           b.hop = rng.range(0.6, 3);
-          const tx = cx + rng.range(-spread, spread);
-          const ty = cy + rng.range(-spread / 2, spread / 2);
-          b.vx = (tx - b.x) * 0.6;
-          b.vy = (ty - b.y) * 0.6;
+          b.vx = (cx + rng.range(-spread, spread) - b.x) * 0.6;
+          b.vy = (cy + rng.range(-spread / 2, spread / 2) - b.y) * 0.6;
           b.face = b.vx < 0 ? -1 : 1;
         }
         b.x += b.vx * dt;
@@ -398,32 +450,48 @@ export function createPigeons(rng, cx, cy, count, spread = 60) {
     draw(ctx) {
       for (const b of birds) {
         const peck = Math.max(0, Math.sin(b.peck)) * 1.5;
-        ctx.fillStyle = 'rgba(0,0,0,0.12)';
-        ctx.fillRect(b.x - 3, b.y - 0.5, 6, 1.4);
-        ctx.fillStyle = '#8d939c';
-        ctx.beginPath();
-        ctx.ellipse(b.x, b.y - 3, 3.4, 2.3, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#5f6b78';
-        ctx.beginPath();
-        ctx.arc(b.x + b.face * 3, b.y - 4.6 + peck, 1.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#e0a030';
-        ctx.fillRect(b.x + b.face * 4.4 - 0.5, b.y - 4.6 + peck, 1, 0.8);
+        onFront(ctx, P, b.x, b.y, z, (c) => {
+          c.fillStyle = 'rgba(0,0,0,0.12)';
+          c.fillRect(-3, -0.5, 6, 1.4);
+          c.fillStyle = '#8d939c';
+          c.beginPath();
+          c.ellipse(0, -3, 3.4, 2.3, 0, 0, Math.PI * 2);
+          c.fill();
+          c.fillStyle = '#5f6b78';
+          c.beginPath();
+          c.arc(b.face * 3, -4.6 + peck, 1.5, 0, Math.PI * 2);
+          c.fill();
+          c.fillStyle = '#e0a030';
+          c.fillRect(b.face * 4.4 - 0.5, -4.6 + peck, 1, 0.8);
+        });
       }
     },
   };
 }
 
-const shadeCache = new Map();
-export function shade(hex, amount) {
-  const key = hex + amount;
-  if (shadeCache.has(key)) return shadeCache.get(key);
-  let h = hex.replace('#', '');
-  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
-  const n = parseInt(h, 16);
-  const f = (c) => Math.max(0, Math.min(255, Math.round(amount < 0 ? c * (1 + amount) : c + (255 - c) * amount)));
-  const out = `rgb(${f((n >> 16) & 255)},${f((n >> 8) & 255)},${f(n & 255)})`;
-  shadeCache.set(key, out);
-  return out;
+/** A vertical wall facing the camera along y = const from x0..x1, z0..z1, with optional openings. */
+export function frontWall(ctx, P, x0, x1, y, z0, z1, fill, gaps = []) {
+  let cursor = x0;
+  for (const [g0, g1] of [...gaps, [x1, x1]]) {
+    if (g0 > cursor) poly(ctx, [P.pt(cursor, y, z0), P.pt(g0, y, z0), P.pt(g0, y, z1), P.pt(cursor, y, z1)], fill, OUT, 0.8);
+    cursor = Math.max(cursor, g1);
+  }
 }
+
+/** Info desk with a round sign on a pole. */
+export function infoDesk3d(ctx, P, x, y, z, colour, signColour, glyph) {
+  drawBox(ctx, P, { x: x - 30, y: y - 14, w: 60, d: 14, h: 18, z }, { front: colour, top: '#e9e2d0' });
+  onFront(ctx, P, x, y - 7, z, (c) => {
+    c.fillStyle = '#3b4250';
+    c.fillRect(-1.5, -66, 3, 48);
+    c.beginPath();
+    c.arc(0, -70, 11, 0, Math.PI * 2);
+    c.fillStyle = signColour;
+    c.fill();
+    c.strokeStyle = OUT;
+    c.stroke();
+    text(c, glyph, 0, -70, { size: 14, colour: glyph === 'i' ? '#fff' : '#1f2d4a' });
+  });
+}
+
+export { sideQuad, topQuad };

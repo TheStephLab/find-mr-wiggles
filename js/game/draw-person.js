@@ -69,8 +69,8 @@ function line(ctx, x1, y1, x2, y2, colour, width) {
 }
 
 /** Entry point. `lod` is 'full' or 'simple'. */
-export function drawPerson(ctx, look, pose, x, y, lod = 'full') {
-  const s = look.height / 40;
+export function drawPerson(ctx, look, pose, x, y, lod = 'full', k = 1) {
+  const s = (look.height / 40) * k;
   const flip = pose.dir === 'left' ? -1 : 1;
   ctx.save();
   ctx.translate(x, y);
@@ -78,6 +78,7 @@ export function drawPerson(ctx, look, pose, x, y, lod = 'full') {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   if (lod === 'simple') drawSimple(ctx, look, pose);
+  else if (lod === 'medium') drawMedium(ctx, look, pose);
   else if (pose.dir === 'left' || pose.dir === 'right') drawSide(ctx, look, pose);
   else drawFrontBack(ctx, look, pose, pose.dir === 'up');
   ctx.restore();
@@ -138,6 +139,246 @@ function drawSimple(ctx, look, pose) {
     ctx.fillStyle = '#6b4526';
     ctx.fillRect(8.5, -20, 1.6, 20);
   }
+}
+
+// ---------------------------------------------------------------- medium LOD
+/**
+ * Mid-distance renderer: flat fills, two outlines, no clipping or dashed
+ * strokes. Keeps every identifying feature (hat, hair, coat, scarf, stick,
+ * glasses) so look-alikes stay just as confusing as up close.
+ */
+function drawMedium(ctx, look, pose) {
+  const m = motion(pose);
+  const side = pose.dir === 'left' || pose.dir === 'right';
+  const back = pose.dir === 'up';
+  const off = m.off;
+  ellipse(ctx, 0, 0, 7.5, 2.3, 'rgba(0,0,0,0.17)');
+  const carry = look.carry?.type;
+  if (carry === 'suitcase') {
+    const sx = side ? -12 : back ? -9 : 9;
+    ctx.fillStyle = '#555';
+    ctx.fillRect(sx - 0.4, -19 + off, 0.8, 8);
+    ctx.fillStyle = look.carry.color;
+    ctx.fillRect(sx - 3.2, -11.5, 6.4, 10.5);
+  }
+
+  // legs
+  const b = look.bottom;
+  const legC = b.type === 'trousers' ? b.color : look.skin;
+  const hipY = HIP + off;
+  const legs = [];
+  if (m.sit) {
+    legs.push([-2.6, 0, 0], [2.6, 0, 0]);
+  } else if (side) {
+    const a = m.swing * 0.5 * m.amp;
+    legs.push([0, -a, 0], [0, a, 0]);
+  } else {
+    legs.push([-2.6, 0, m.moving ? Math.max(0, m.swing) * 2.4 * m.amp : 0], [2.6, 0, m.moving ? Math.max(0, -m.swing) * 2.4 * m.amp : 0]);
+  }
+  for (const [lx, angle, lift] of legs) {
+    ctx.save();
+    const top = m.sit ? -12 : hipY;
+    ctx.translate(lx, top);
+    if (angle) ctx.rotate(angle);
+    const len = (m.sit ? 12 : -hipY) - lift;
+    ctx.fillStyle = legC;
+    ctx.fillRect(-2.1, 0, 4.2, len);
+    if (b.type === 'shorts') {
+      ctx.fillStyle = b.color;
+      ctx.fillRect(-2.1, 0, 4.2, len * 0.45);
+    } else if (b.type === 'knickers') {
+      ctx.fillStyle = b.color;
+      ctx.fillRect(-3, 0, 6, len - 6.5);
+    }
+    if (look.socks) {
+      ctx.fillStyle = look.socks.colors[0];
+      ctx.fillRect(-2.1, len - 6.4, 4.2, 2.2);
+      ctx.fillStyle = look.socks.colors[1];
+      ctx.fillRect(-2.1, len - 4.2, 4.2, 2.2);
+    }
+    ctx.fillStyle = look.shoes.color;
+    ctx.beginPath();
+    ctx.ellipse(side ? 1.4 : 0, len - 0.6, 3.2, 1.6, 0, 0, TAU);
+    ctx.fill();
+    if (look.shoes.curly) {
+      ctx.beginPath();
+      ctx.arc(side ? 4.4 : Math.sign(lx || 1) * 3.4, len - 2, 1.1, 0, TAU);
+      ctx.strokeStyle = look.shoes.color;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  if (b.type === 'skirt') {
+    ctx.fillStyle = b.color;
+    ctx.beginPath();
+    ctx.moveTo(-5.5, hipY - 1.5);
+    ctx.lineTo(5.5, hipY - 1.5);
+    ctx.lineTo(7, hipY + 7.5);
+    ctx.lineTo(-7, hipY + 7.5);
+    ctx.fill();
+  }
+
+  // torso
+  const w = (side ? 8.6 : 12.2) * look.build;
+  const tTop = SHOULDER - 1.2 + off;
+  const tBot = (look.top.type === 'coat' ? -12.5 : -16) + off;
+  const th = tBot - tTop;
+  const top = look.top;
+  const sy = SHOULDER + off;
+  const swingA = side ? m.swing * 0.55 * m.amp : 0;
+  const armColour = (which) => (top.pattern === 'patchwork' ? (which ? top.color2 : top.color) : top.type === 'dress' ? look.skin : top.color);
+  const drawArm = (sx, hx, hy, which) => {
+    line(ctx, sx, sy, hx, hy, armColour(which), 3.2);
+    if (top.pattern === 'stripes' || (top.pattern === 'patchwork' && !which)) line(ctx, sx + (hx - sx) * 0.45, sy + (hy - sy) * 0.45, sx + (hx - sx) * 0.6, sy + (hy - sy) * 0.6, top.pattern === 'patchwork' ? top.accent : top.color2, 3.2);
+    circle(ctx, hx, hy, 1.4, look.skin);
+  };
+  let L;
+  let R;
+  if (side) {
+    L = { x: Math.sin(-swingA) * 11.5, y: sy + Math.cos(swingA) * 11.5 };
+    R = { x: Math.sin(swingA) * 11.5, y: sy + Math.cos(swingA) * 11.5 };
+    if (carry === 'wigglesStick' || carry === 'cane') R = { x: 4.5, y: -19 + off };
+    if (pose.action === 'phone') R = { x: 2.4, y: HEAD_Y + 1.5 + off };
+    drawArm(0, L.x, L.y, 0);
+  } else {
+    const a = armTargets(look, pose, m, w, back);
+    L = a.L;
+    R = a.R;
+    if (back) {
+      drawArm(a.sxL, L.x, L.y, 1);
+      drawArm(a.sxR, R.x, R.y, 0);
+    }
+  }
+  rrect(ctx, -w / 2, tTop, w, th, 2.4);
+  ctx.fillStyle = top.color;
+  ctx.fill();
+  if (top.pattern === 'patchwork') {
+    ctx.fillStyle = top.color2;
+    if (side) ctx.fillRect(-w / 2, tTop + 1, w, th - 1);
+    else ctx.fillRect(back ? -w / 2 : 0, tTop + 1, w / 2, th - 1);
+    ctx.fillStyle = top.patch;
+    ctx.fillRect(back ? w * 0.08 : -w * 0.42, tTop + th * 0.55, w * 0.26, th * 0.22);
+    ctx.fillStyle = top.accent;
+    ctx.fillRect(back ? -w * 0.38 : w * 0.12, tTop + th * 0.2, w * 0.2, th * 0.18);
+  } else if (top.pattern === 'stripes') {
+    ctx.fillStyle = top.color2;
+    for (let yy = tTop + 2; yy < tBot - 1; yy += 3) ctx.fillRect(-w / 2 + 0.6, yy, w - 1.2, 1.3);
+  } else if (top.pattern === 'dots') {
+    ctx.fillStyle = top.color2;
+    for (const [dx, dy] of [[-0.25, 0.3], [0.2, 0.25], [-0.05, 0.6], [0.25, 0.75], [-0.3, 0.85]]) ctx.fillRect(dx * w - 0.6, tTop + dy * th - 0.6, 1.2, 1.2);
+  }
+  if (look.vest) {
+    ctx.fillStyle = look.vest;
+    if (back || side) ctx.fillRect(-w / 2, tTop + 1, w, th - 1);
+    else {
+      ctx.fillRect(-w / 2, tTop + 1, w * 0.36, th - 1);
+      ctx.fillRect(w * 0.14, tTop + 1, w * 0.36, th - 1);
+    }
+  }
+  if (look.apron && !back) {
+    ctx.fillStyle = look.apron;
+    ctx.fillRect(-w * 0.32, tTop + th * 0.28, w * 0.64, th * 0.75);
+  }
+  rrect(ctx, -w / 2, tTop, w, th, 2.4);
+  ctx.strokeStyle = OUT;
+  ctx.lineWidth = 0.7;
+  ctx.stroke();
+  if (look.satchel) {
+    ctx.fillStyle = '#c8a878';
+    ctx.fillRect(back ? 3.6 : side ? 1.2 : 2.6, -21.5 + off, 6, 5.4);
+  }
+  if (look.scarf) {
+    const cs = look.scarf.colors;
+    const n = Math.min(cs.length, 4);
+    for (let i = 0; i < n; i++) {
+      ctx.fillStyle = cs[i];
+      ctx.fillRect(-5.2 + (i * 10.4) / n, SHOULDER - 2.2 + off, 10.4 / n + 0.2, 2.6);
+    }
+    if (!back) {
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = cs[(i + 1) % cs.length];
+        ctx.fillRect(side ? -w / 2 - 2 : -4.4, SHOULDER + 0.4 + i * 2.4 + off, 2.8, 2.4);
+      }
+    }
+  }
+  if (!back) {
+    if (side) drawArm(0, R.x, R.y, 1);
+    else {
+      drawArm(-w / 2 - 0.6, L.x, L.y, 0);
+      drawArm(w / 2 + 0.6, R.x, R.y, 1);
+    }
+  }
+  if (carry === 'wigglesStick' || carry === 'cane') {
+    line(ctx, R.x + 1, R.y - 2, R.x + 1.8, 0, carry === 'cane' ? '#3b3b3b' : '#5a3a1e', 1.5);
+    if (carry === 'wigglesStick') {
+      ctx.fillStyle = '#ffcd50';
+      ctx.fillRect(R.x + 2.4, R.y + 0.6, 1.8, 2.4);
+    }
+  } else if (carry === 'balloon') {
+    const by = -58 + Math.sin(pose.t * 1.6 + look.height) * 1.2;
+    line(ctx, L.x, L.y, L.x + 3, by + 5, '#666', 0.3);
+    ellipse(ctx, L.x + 3, by, 4, 4.8, look.carry.color);
+  } else if (carry === 'bag') {
+    ctx.fillStyle = look.carry.color;
+    ctx.fillRect(R.x - 2.4, R.y, 4.8, 4.4);
+  } else if (carry === 'umbrella') {
+    line(ctx, R.x, R.y, R.x + 0.6, R.y + 12, look.carry.color, 2.2);
+  } else if (carry === 'guitar' || pose.action === 'guitar') {
+    guitar(ctx, off);
+  }
+
+  // head
+  const cy = HEAD_Y + off;
+  const hx = side ? 0.6 : 0;
+  const { style, color } = look.hair;
+  if (style === 'wiggles' || (style === 'curly' && color === '#8b5cc7')) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(hx - (side ? 1.5 : 0), cy - 0.5, side ? 7 : 8.2, 7, 0, 0, TAU);
+    ctx.fill();
+  } else if (style === 'long' && !side) {
+    ctx.fillStyle = color;
+    ctx.fillRect(-5.6, cy - 2, 11.2, 9);
+  }
+  ctx.beginPath();
+  ctx.arc(hx, cy, HEAD_R, 0, TAU);
+  ctx.fillStyle = back && style !== 'bald' ? color : look.skin;
+  ctx.fill();
+  ctx.strokeStyle = OUT;
+  ctx.lineWidth = 0.7;
+  ctx.stroke();
+  if (!back) {
+    if (style !== 'bald') {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(hx, cy - 0.4, HEAD_R + 0.4, Math.PI * 1.05, Math.PI * 1.95);
+      ctx.fill();
+    }
+    ctx.fillStyle = OUT;
+    if (side) ctx.fillRect(2.6, cy - 0.8, 1.1, 1.1);
+    else {
+      ctx.fillRect(-2.2, cy - 0.5, 1.1, 1.1);
+      ctx.fillRect(1.1, cy - 0.5, 1.1, 1.1);
+    }
+    if (look.nose) circle(ctx, side ? 5.2 : 0, cy + 0.9, 1.25, look.nose);
+    if (look.beard) {
+      ctx.beginPath();
+      ctx.arc(hx, cy + 2, 3.4, 0.05 * Math.PI, 0.95 * Math.PI);
+      ctx.fillStyle = look.beard;
+      ctx.fill();
+    }
+    if (look.glasses) {
+      ctx.lineWidth = 0.7;
+      if (side) {
+        circle(ctx, 3.2, cy - 0.2, 1.6, null, look.glasses.right, 0.7);
+      } else {
+        circle(ctx, -1.8, cy, 1.6, null, look.glasses.left, 0.7);
+        circle(ctx, 1.8, cy, 1.6, null, look.glasses.right, 0.7);
+      }
+    }
+  }
+  if (look.hat) drawHat(ctx, look.hat, cy, back ? 'back' : side ? 'side' : 'front');
 }
 
 // ---------------------------------------------------------------- torso

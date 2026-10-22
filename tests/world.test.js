@@ -48,7 +48,7 @@ for (const scene of SCENES) {
     const world = createWorld(scene, { level: 4, seed: 99 });
     const start = new Map(world.agents.map((a) => [a, { x: a.x, y: a.y }]));
     const levelsVisited = new Map();
-    const levelOf = (a) => (a.y < world.height * 0.65 ? 'top' : 'bottom');
+    const levelOf = (a) => (a.z > 28 ? 'top' : 'bottom');
     for (let i = 0; i < 120 * 20; i++) {
       world.update(1 / 20);
       if (i % 40 === 0) {

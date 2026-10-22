@@ -15,7 +15,7 @@ for (const d of DIFFICULTIES) {
     let decoys = 0;
     for (let i = 0; i < 4000; i++) {
       const role = rng.pick(['commuter', 'traveller', 'tourist', 'child', 'elderly', 'jogger']);
-      const look = createCrowdLook(rng, { role, decoyRate: d.decoyRate, maxDecoyTraits: d.maxDecoyTraits });
+      const look = createCrowdLook(rng, { role, decoyRate: d.decoyRate, maxDecoyTraits: d.maxDecoyTraits, paletteBias: d.paletteBias });
       assert.ok(isValidCrowdLook(look, d.maxDecoyTraits), `invalid look: ${JSON.stringify(traitsOf(look))}`);
       if (traitsOf(look).length) decoys++;
     }

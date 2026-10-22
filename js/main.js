@@ -118,9 +118,9 @@ function renderThumb(scene, canvas) {
   }
   const world = createWorld(scene, { level: 2, seed: 20261022 });
   for (let i = 0; i < 40; i++) world.update(0.1);
-  const camera = createCamera({ viewW: canvas.width, viewH: canvas.height, worldW: world.width, worldH: world.height });
+  const camera = createCamera({ viewW: canvas.width, viewH: canvas.height, worldW: world.pictureWidth, worldH: world.pictureHeight });
   camera.minScale = 0;
-  centreOn(camera, world.width / 2, world.height * 0.55, (canvas.width / world.width) * 1.9);
+  centreOn(camera, world.pictureWidth / 2, world.pictureHeight * 0.55, (canvas.width / world.pictureWidth) * 1.7);
   createRenderer(canvas, world, { dpr: 1 }).render(camera, world.time);
   const copy = document.createElement('canvas');
   copy.width = canvas.width;

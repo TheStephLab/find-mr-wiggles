@@ -101,7 +101,9 @@ function choosePoi(agent, world) {
 }
 
 function chooseRoamNode(agent, world, far = false) {
-  const { rng, walkNodes } = world;
+  const { rng } = world;
+  // Prefer destinations in plain view so wanderers end up somewhere visible.
+  const walkNodes = world.openNodes?.length ? world.openNodes : world.walkNodes;
   let best = walkNodes[Math.floor(rng.next() * walkNodes.length)];
   if (far) return best.id;
   for (let k = 0; k < 6; k++) {
@@ -201,6 +203,11 @@ function arrive(agent, world) {
   agent.timer = rng.range(0.6, 4.5);
   agent.action = rng.chance(0.25) ? rng.pick(['phone', null, 'wave']) : null;
   if (agent.look.carry?.type === 'newspaper' && rng.chance(0.5)) agent.action = 'read';
+  // Never pause somewhere the camera can't see: keep walking until back in view.
+  if (world.isHiddenSpot?.(agent.x, agent.y)) {
+    agent.timer = 0;
+    agent.action = null;
+  }
 }
 
 function travel(agent, world, dt) {
@@ -303,15 +310,18 @@ export function updateAgent(agent, world, dt) {
       break;
   }
   agent.sortY = agent.y + agent.sortBias;
+  agent.z = world.zAt ? world.zAt(agent.x, agent.y) : 0;
 }
 
 export function agentPose(agent, t) {
   return { dir: agent.dir, mode: agent.mode, phase: agent.phase, t, action: agent.action, seed: agent.seed };
 }
 
-/** World-space bounding box covering the head, hat and held items. */
-export function agentBounds(agent) {
-  const s = agent.look.height / 40;
-  const top = agent.look.hat ? 50 : 42;
-  return { x: agent.x - 10 * s, y: agent.y - top * s, w: 20 * s, h: top * s + 2 };
+/** Picture-space bounding box covering the head, hat and held items. */
+export function agentBounds(agent, P) {
+  const s = (agent.look.height / 40) * P.s(agent.y);
+  const top = agent.look.hat ? 52 : 44;
+  const px = P.X(agent.x, agent.y);
+  const py = P.Y(agent.y, agent.z ?? 0);
+  return { x: px - 10 * s, y: py - top * s, w: 20 * s, h: top * s + 2 * s };
 }

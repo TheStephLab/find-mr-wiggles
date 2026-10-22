@@ -4,7 +4,7 @@ import { createRenderer } from './renderer.js';
 import { attachInput } from './input.js';
 
 const FOUND_DELAY_MS = 1600;
-const HINT_COOLDOWN_MS = 8000;
+const DEFAULT_HINT_COOLDOWN_MS = 8000;
 
 /**
  * One play-through of a scene: owns the world, camera, render loop, timer,
@@ -14,11 +14,13 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
   const world = createWorld(scene, { level, seed, perfFactor });
   const renderer = createRenderer(canvas, world);
   const rect = canvas.getBoundingClientRect();
-  const camera = createCamera({ viewW: rect.width || 800, viewH: rect.height || 600, worldW: world.width, worldH: world.height });
+  const camera = createCamera({ viewW: rect.width || 800, viewH: rect.height || 600, worldW: world.pictureWidth, worldH: world.pictureHeight });
+  const HINT_COOLDOWN_MS = world.difficulty.hintCooldown ?? DEFAULT_HINT_COOLDOWN_MS;
+  const tapTolerance = world.difficulty.tapTolerance ?? 1;
   const speed = reducedMotion ? 0.55 : 1;
   // Portrait phones: start zoomed to fill the height rather than showing a thin strip.
-  const cover = Math.max(camera.viewW / world.width, camera.viewH / world.height);
-  centreOn(camera, world.width / 2, world.height / 2, Math.min(cover, camera.minScale * 2.6));
+  const cover = Math.max(camera.viewW / world.pictureWidth, camera.viewH / world.pictureHeight);
+  centreOn(camera, world.pictureWidth / 2, world.pictureHeight / 2, Math.min(cover, camera.minScale * 2.6));
 
   let state = 'ready'; // ready | running | paused | found | destroyed
   let elapsed = 0;
@@ -107,7 +109,8 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
       ctx.restore();
     }
     if (state === 'found') {
-      const w = world.wiggles;
+      const w = world.wigglesPoint();
+      const k = world.P.s(world.wiggles.y);
       const pulse = 1 + Math.sin(t * 6) * 0.08;
       ctx.save();
       ctx.lineWidth = Math.max(2.5, 4 / cam.scale);
@@ -115,7 +118,7 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
       ctx.shadowColor = 'rgba(255,210,63,0.9)';
       ctx.shadowBlur = 12;
       ctx.beginPath();
-      ctx.ellipse(w.x, w.y - 24, 26 * pulse, 34 * pulse, 0, 0, Math.PI * 2);
+      ctx.ellipse(w.x, w.y + 4 * k, 26 * k * pulse, 34 * k * pulse, 0, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
       for (const p of confetti) {
@@ -176,12 +179,13 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
   function guessAt(sx, sy) {
     if (state !== 'running') return;
     const p = screenToWorld(camera, sx, sy);
-    const tolerance = Math.min(22, 9 / camera.scale);
+    // Harder levels need a more precise tap (tolerance is in screen pixels).
+    const tolerance = Math.min(14, (7 * tapTolerance) / camera.scale);
     if (world.isWigglesAt(p.x, p.y, tolerance)) {
       found();
       return;
     }
-    const person = world.agentAt(p.x, p.y, Math.min(6, 4 / camera.scale));
+    const person = world.agentAt(p.x, p.y, Math.min(5, 3 / camera.scale));
     markers.push({ x: p.x, y: p.y, t0: performance.now(), person: Boolean(person) });
     if (person) misses++;
     onGuess?.({ person, misses });
@@ -190,6 +194,7 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
   function found() {
     state = 'found';
     const w = world.wiggles;
+    const head = world.wigglesPoint();
     if (w.poi) w.poi.occupants = Math.max(0, w.poi.occupants - 1);
     w.queue?.leave(w);
     Object.assign(w, { state: 'fixed', mode: 'stand', dir: 'down', action: 'wave', fixedActions: ['wave'], path: null, poi: null, queue: null, sortBias: 0 });
@@ -197,11 +202,11 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
     for (let i = 0; i < 70; i++) {
       const a = Math.random() * Math.PI * 2;
       const v = 60 + Math.random() * 140;
-      confetti.push({ x: w.x, y: w.y - 40, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 120, r: Math.random() * 6, vr: (Math.random() - 0.5) * 12, c: colours[i % colours.length] });
+      confetti.push({ x: head.x, y: head.y - 14, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 120, r: Math.random() * 6, vr: (Math.random() - 0.5) * 12, c: colours[i % colours.length] });
     }
     // Frame him in the upper part of the screen; the results card docks at the bottom.
     const target = Math.max(camera.scale, Math.min(3, camera.maxScale));
-    tweenCamera(w.x, w.y - 20 + (camera.viewH * 0.24) / target, target, 900);
+    tweenCamera(head.x, head.y + (camera.viewH * 0.24) / target, target, 900);
     navigator.vibrate?.(60);
     setTimeout(() => {
       if (state === 'found') onFound?.({ timeMs: elapsed, misses, hintsUsed });
@@ -283,12 +288,12 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
       if (now - lastHintAt < HINT_COOLDOWN_MS) return false;
       lastHintAt = now;
       hintsUsed++;
-      const w = world.wiggles;
-      const base = Math.min(world.width, world.height) * 0.32;
+      const w = world.wigglesPoint();
+      const base = Math.min(world.pictureWidth, world.pictureHeight) * 0.3;
       const r = Math.max(70, base / (1 + (hintsUsed - 1) * 0.8));
       const a = Math.random() * Math.PI * 2;
       const off = Math.random() * r * 0.55;
-      hint = { x: w.x + Math.cos(a) * off, y: w.y - 20 + Math.sin(a) * off, r, t0: now };
+      hint = { x: w.x + Math.cos(a) * off, y: w.y + Math.sin(a) * off, r, t0: now };
       const fit = Math.min(camera.viewW, camera.viewH) / (r * 2.6);
       tweenCamera(hint.x, hint.y, Math.max(camera.minScale, Math.min(fit, camera.maxScale)), 800);
       return true;
