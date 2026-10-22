@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Find Mr. Wiggles</title>
+  <meta name="description" content="A busy seek-and-find game. Spot Mr. Wiggles in bustling train stations, airports and more.">
+  <meta name="theme-color" content="#2f9c9a">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./assets/icon.svg">
+  <link rel="stylesheet" href="./css/styles.css">
+  <script type="module" src="./js/main.js"></script>
+</head>
+<body>
+  <main id="app">
+    <!-- Home -->
+    <section id="screen-home" class="screen screen-home" aria-labelledby="home-title">
+      <div class="home-card">
+        <h1 id="home-title" class="logo">Find <span class="logo-name">Mr.&nbsp;Wiggles</span></h1>
+        <canvas id="home-portrait" class="portrait" width="220" height="280" role="img"
+          aria-label="Mr. Wiggles waving. He has curly purple hair, a tall teal and orange striped hat with a feather, odd round glasses, a pink nose, a rainbow scarf, a yellow and green patchwork coat, a satchel, olive knickerbockers, striped socks, curly-toed boots and a knobbly walking stick with a little lantern."></canvas>
+        <p class="tagline">He's wandered off again! Spot Mr. Wiggles in the busiest places in the land.</p>
+        <div class="actions">
+          <button id="btn-play" class="btn btn-primary" type="button">Play</button>
+          <button id="btn-scenes" class="btn" type="button">Choose a scene</button>
+        </div>
+        <div class="actions actions-small">
+          <button id="btn-meet" class="btn btn-ghost" type="button">Meet Mr. Wiggles</button>
+          <button id="btn-howto" class="btn btn-ghost" type="button">How to play</button>
+          <button id="btn-settings" class="btn btn-ghost" type="button">Settings</button>
+        </div>
+        <p class="home-meta"><span id="home-difficulty"></span> · <span id="home-progress"></span></p>
+      </div>
+    </section>
+
+    <!-- Scene select -->
+    <section id="screen-scenes" class="screen screen-scenes" aria-labelledby="scenes-title" hidden>
+      <header class="screen-header">
+        <button id="btn-scenes-back" class="btn btn-icon" type="button" aria-label="Back to home">←</button>
+        <h2 id="scenes-title">Choose a scene</h2>
+        <button id="btn-scenes-settings" class="btn btn-ghost" type="button">Settings</button>
+      </header>
+      <ul id="scene-list" class="scene-grid" role="list"></ul>
+      <p class="coming-soon">More places coming soon: fairgrounds, cruise ships, shopping centres, parks and sleepy villages…</p>
+    </section>
+
+    <!-- Game -->
+    <section id="screen-game" class="screen screen-game" aria-label="Game" hidden>
+      <canvas id="game-canvas" class="game-canvas" tabindex="0" role="application"
+        aria-roledescription="seek and find scene"
+        aria-label="Busy scene. Drag or use arrow keys to pan, pinch, scroll or plus and minus to zoom. Tap a person, or press Enter to check the person under the crosshair."></canvas>
+      <header class="hud">
+        <button id="btn-exit" class="btn btn-icon hud-btn" type="button" aria-label="Pause and show menu">☰</button>
+        <div class="hud-title">
+          <span id="hud-scene" class="hud-scene"></span>
+          <span id="hud-diff" class="hud-diff"></span>
+        </div>
+        <span id="hud-timer" class="hud-timer" role="timer" aria-label="Time taken">0:00</span>
+      </header>
+      <div class="hud-tools">
+        <button id="btn-target" class="btn hud-btn target-btn" type="button" aria-label="Who am I looking for?">
+          <canvas id="target-portrait" width="56" height="56" aria-hidden="true"></canvas>
+        </button>
+        <button id="btn-hint" class="btn hud-btn" type="button">Hint</button>
+        <button id="btn-zoom-in" class="btn btn-icon hud-btn" type="button" aria-label="Zoom in">+</button>
+        <button id="btn-zoom-out" class="btn btn-icon hud-btn" type="button" aria-label="Zoom out">−</button>
+      </div>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <!-- Dialogs -->
+  <dialog id="dlg-start" class="dialog" aria-labelledby="start-title">
+    <p id="start-kind" class="eyebrow"></p>
+    <h2 id="start-title"></h2>
+    <p id="start-blurb"></p>
+    <div class="start-body">
+      <canvas id="start-portrait" class="portrait portrait-small" width="150" height="190" aria-hidden="true"></canvas>
+      <ul class="traits">
+        <li>Tall teal &amp; orange <strong>striped hat</strong> with a feather</li>
+        <li>Curly <strong>purple hair</strong> and a pink nose</li>
+        <li><strong>Odd glasses</strong>: one orange rim, one teal</li>
+        <li><strong>Rainbow scarf</strong> and <strong>patchwork coat</strong></li>
+        <li>A <strong>knobbly stick</strong> with a tiny lantern</li>
+      </ul>
+    </div>
+    <p class="start-diff">Difficulty: <strong id="start-diff"></strong> <button id="btn-start-diff" class="link-btn" type="button">change</button></p>
+    <div class="actions">
+      <button id="btn-start" class="btn btn-primary" type="button">Start searching</button>
+      <button id="btn-start-cancel" class="btn btn-ghost" type="button">Back</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-found" class="dialog dialog-found" aria-labelledby="found-title">
+    <h2 id="found-title">You found Mr. Wiggles!</h2>
+    <p class="stars" id="found-stars" aria-label=""></p>
+    <dl class="found-stats">
+      <div><dt>Time</dt><dd id="found-time"></dd></div>
+      <div><dt>Wrong guesses</dt><dd id="found-misses"></dd></div>
+      <div><dt>Hints</dt><dd id="found-hints"></dd></div>
+    </dl>
+    <p id="found-best" class="found-best"></p>
+    <div class="actions">
+      <button id="btn-next" class="btn btn-primary" type="button">Next scene</button>
+      <button id="btn-again" class="btn" type="button">Play again</button>
+      <button id="btn-found-scenes" class="btn btn-ghost" type="button">All scenes</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-pause" class="dialog" aria-labelledby="pause-title">
+    <h2 id="pause-title">Paused</h2>
+    <p>The clock has stopped. Mr. Wiggles is hiding in the crowd…</p>
+    <div class="actions actions-col">
+      <button id="btn-resume" class="btn btn-primary" type="button">Resume</button>
+      <button id="btn-restart" class="btn" type="button">New game (Mr. Wiggles moves)</button>
+      <button id="btn-quit" class="btn btn-ghost" type="button">Quit to scenes</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-settings" class="dialog" aria-labelledby="settings-title">
+    <h2 id="settings-title">Settings</h2>
+    <fieldset class="difficulty">
+      <legend>Difficulty</legend>
+      <div id="difficulty-options" class="difficulty-options"></div>
+    </fieldset>
+    <label class="toggle">
+      <input id="opt-motion" type="checkbox">
+      <span>Calmer crowds (slower movement)</span>
+    </label>
+    <div class="danger-zone">
+      <button id="btn-reset" class="btn btn-danger" type="button">Reset progress…</button>
+    </div>
+    <div class="actions">
+      <button id="btn-settings-close" class="btn btn-primary" type="button">Done</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-confirm" class="dialog" aria-labelledby="confirm-title">
+    <h2 id="confirm-title">Reset all progress?</h2>
+    <p>Completed scenes and best times will be cleared. This can't be undone.</p>
+    <div class="actions">
+      <button id="btn-confirm-yes" class="btn btn-danger" type="button">Reset</button>
+      <button id="btn-confirm-no" class="btn btn-primary" type="button">Keep my progress</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-howto" class="dialog" aria-labelledby="howto-title">
+    <h2 id="howto-title">How to play</h2>
+    <ol class="howto">
+      <li>Mr. Wiggles is somewhere in every scene, and like everyone else he's <strong>on the move</strong>.</li>
+      <li><strong>Pinch</strong> or <strong>scroll</strong> to zoom, <strong>drag</strong> to look around.</li>
+      <li><strong>Tap</strong> him when you spot him. Tapping the wrong person counts as a wrong guess.</li>
+      <li>Stuck? A <strong>Hint</strong> circles the area he's in, but costs you a star.</li>
+      <li>Keyboard: arrows to pan, <kbd>+</kbd>/<kbd>−</kbd> to zoom, <kbd>Enter</kbd> to check the crosshair.</li>
+    </ol>
+    <p>Finish a scene to unlock the next. You can replay any scene you've completed. Progress is saved on this device only. No accounts needed.</p>
+    <div class="actions"><button class="btn btn-primary" type="button" data-close>Got it</button></div>
+  </dialog>
+
+  <dialog id="dlg-meet" class="dialog dialog-meet" aria-labelledby="meet-title">
+    <h2 id="meet-title">Meet Mr. Wiggles</h2>
+    <div class="meet-body">
+      <canvas id="meet-portrait" class="portrait" width="180" height="230" aria-hidden="true"></canvas>
+      <ul class="traits">
+        <li>Floppy <strong>teal &amp; orange striped hat</strong> with a cream feather</li>
+        <li>Wild, curly <strong>purple hair</strong></li>
+        <li><strong>Mismatched round glasses</strong> and a pink nose</li>
+        <li>A <strong>rainbow-striped scarf</strong></li>
+        <li><strong>Patchwork coat</strong>: yellow on one side, green with blue spots on the other</li>
+        <li>Tan satchel stuffed with maps</li>
+        <li>Olive knickerbockers, <strong>striped socks</strong> and <strong>curly-toed boots</strong></li>
+        <li>A <strong>knobbly walking stick</strong> with a tiny glowing lantern</li>
+      </ul>
+    </div>
+    <details class="reference">
+      <summary>Original character sheet</summary>
+      <img src="./assets/mr-wiggles-reference.jpg" alt="Character sheet of Mr. Wiggles showing him from the front, back and side, with close-ups of his glasses, boots, satchel and walking stick." loading="lazy" width="2000" height="1116">
+    </details>
+    <div class="actions"><button class="btn btn-primary" type="button" data-close>Let's find him!</button></div>
+  </dialog>
+
+  <div id="sr-live" class="visually-hidden" aria-live="assertive"></div>
+  <noscript><p class="noscript">Find Mr. Wiggles needs JavaScript to run.</p></noscript>
+</body>
+</html>

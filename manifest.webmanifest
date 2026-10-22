@@ -1,0 +1,14 @@
+{
+  "name": "Find Mr. Wiggles",
+  "short_name": "Mr. Wiggles",
+  "description": "A busy seek-and-find game. Spot Mr. Wiggles in bustling stations, airports and more.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f0df",
+  "theme_color": "#2f9c9a",
+  "icons": [
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

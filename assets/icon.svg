@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Mr. Wiggles' striped hat">
+  <rect width="512" height="512" rx="112" fill="#f7f0df"/>
+  <circle cx="256" cy="300" r="150" fill="#8b5cc7"/>
+  <circle cx="256" cy="320" r="110" fill="#f6d2bd" stroke="#2a2230" stroke-width="10"/>
+  <circle cx="214" cy="318" r="30" fill="#e8f4ff" stroke="#b5652a" stroke-width="10"/>
+  <circle cx="298" cy="318" r="30" fill="#e8f4ff" stroke="#2f9c9a" stroke-width="10"/>
+  <circle cx="214" cy="318" r="8" fill="#2a2230"/>
+  <circle cx="298" cy="318" r="8" fill="#2a2230"/>
+  <circle cx="256" cy="352" r="22" fill="#f08a9a" stroke="#2a2230" stroke-width="6"/>
+  <path d="M220 390 Q256 420 292 390" fill="none" stroke="#2a2230" stroke-width="9" stroke-linecap="round"/>
+  <clipPath id="crown"><path d="M160 228 C140 150 150 70 250 66 C350 62 370 150 352 228 Z"/></clipPath>
+  <g clip-path="url(#crown)">
+    <rect x="100" y="40" width="320" height="200" fill="#2f9c9a"/>
+    <g fill="#e98a3a">
+      <path d="M90 228 L130 228 L250 40 L210 40 Z"/>
+      <path d="M170 228 L210 228 L330 40 L290 40 Z"/>
+      <path d="M250 228 L290 228 L410 40 L370 40 Z"/>
+    </g>
+    <rect x="100" y="198" width="320" height="30" fill="#e98a3a"/>
+  </g>
+  <path d="M160 228 C140 150 150 70 250 66 C350 62 370 150 352 228 Z" fill="none" stroke="#2a2230" stroke-width="10"/>
+  <ellipse cx="256" cy="232" rx="170" ry="34" fill="#2f9c9a" stroke="#2a2230" stroke-width="10"/>
+  <path d="M346 200 Q410 160 404 96 Q372 150 346 200 Z" fill="#efe2bd" stroke="#a89060" stroke-width="5"/>
+</svg>
