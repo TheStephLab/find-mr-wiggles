@@ -11,6 +11,7 @@ A busy seek-and-find web game in the spirit of *Where's Wally?*. Mr. Wiggles has
 - **3D scenes**: a tilted perspective camera instead of a bird's-eye map. Upper concourses sit a storey above the halls below, escalators really climb between them, and shops, pillars, trains and planes are solid 3D objects.
 - **Walk behind things, always reappear**: people pass behind kiosks, pillars and departure boards, but nobody, Mr. Wiggles included, stops anywhere the camera can't see. Routes favour open ground, so anyone who slips out of view comes back within a few seconds.
 - **Living scenes**: everyone is busy doing things. They walk, jog, ride escalators and travelators, queue at check-in and security, browse kiosks, sit on benches, read the paper, play the station piano, watch the busker and wait on platforms while trains arrive and depart.
+- **Realistic people**: real-world proportions (bigger heads for children), jointed limbs with a proper walking and jogging gait, and shaded clothes, faces, hair and hats, drawn from the front, back and side.
 - **Mr. Wiggles is always the same**: striped teal and orange hat with a feather, purple curly hair, mismatched glasses, a pink nose, a rainbow scarf, a patchwork coat, a satchel, striped socks, curly boots and a knobbly lantern stick. A new random seed puts him somewhere different every game.
 - **Two scenes to start**, both fictional:
   1. **Whistlebury Junction**, a train station with platforms, a concourse and a metro hall.
@@ -68,10 +69,12 @@ js/core/                       Pure, framework-free utilities (unit-tested)
   geometry.js                    Rect/segment helpers
 js/game/
   people.js                      Character "looks"; Mr. Wiggles is a frozen look; decoy rules
-  draw-person.js                 One renderer for everyone (front/back/side, poses, 3 LODs)
+  draw-person.js                 One figure model for everyone: views, gait, arm poses, far LOD
+  figure/                        Figure parts: core (rig, gait, shaded limbs), head, clothes, items
+  sprite-cache.js                Budgeted atlas of pre-rendered character frames
   agents.js                      Crowd behaviour state machine (travel/activity/queue/fixed)
   world.js                       Builds a world from a scene + difficulty + seed
-  renderer.js                    Perspective floor cache, culling, depth sorting, LOD
+  renderer.js                    Perspective floor cache, culling, depth sorting, sprite blits
   input.js                       Pointer Events: drag, pinch, tap, wheel, inertia
   game.js                        One play-through: loop, timer, guesses, hints, celebration
 js/scenes/
@@ -84,7 +87,17 @@ js/scenes/
 sw.js, manifest.webmanifest    Offline support / installable app
 ```
 
-**Rendering.** The world is a ground plan (x across, y into the scene, z up). A one-point perspective camera projects it into a *picture* that you pan and zoom over. Far things shrink and converge, floors foreshorten, and people and props stand upright. The backdrop and floor are rendered once: the flat floor plan is drawn in bands and warped into perspective strip by strip (Mode 7 style). When you zoom in past that bitmap's resolution, a sharp copy of just the visible area is rebuilt once the camera settles. Props are real extruded boxes, or artwork on camera-facing planes. Everything is depth-sorted by its nearest ground line, so people walk behind and in front of things. Characters switch between full, medium and block levels of detail by their size on screen, and labels too small to read are drawn as smudges.
+**Rendering.** The world is a ground plan (x across, y into the scene, z up). A one-point perspective camera projects it into a *picture* that you pan and zoom over. Far things shrink and converge, floors foreshorten, and people and props stand upright. The backdrop and floor are rendered once: the flat floor plan is drawn in bands and warped into perspective strip by strip (Mode 7 style). When you zoom in past that bitmap's resolution, a sharp copy of just the visible area is rebuilt once the camera settles. Props are real extruded boxes, or artwork on camera-facing planes. Everything is depth-sorted by its nearest ground line, so people walk behind and in front of things. Labels too small to read are drawn as smudges.
+
+**Characters and smooth frame rates.** A detailed figure takes about a millisecond to draw, far too slow for hundreds of people every frame. Each animation frame is therefore rendered once into a 1024² sprite atlas and blitted with `drawImage`. Frames are keyed by look, quantised pose (8 walk frames, 4 action frames, left mirrored from right) and scale bucket (steps of about 26%). Smoothness comes first:
+
+- Each frame may only prepare a few new sprites (about 4, within about 5 ms). Canvas rasterisation is deferred, so counting sprites matters as much as timing them. The budget drops automatically after slow frames.
+- Until a sprite is ready, the nearest cached scale or walk frame stands in. A cheap block figure is the last resort.
+- The scene is built behind the start card, so the visible crowd is prepared before the clock starts.
+- Atlas pages are recycled least-recently-used first, capped by device memory (8–20 pages).
+- Tiny figures skip sprites entirely, and very close-up figures are drawn directly as vectors.
+
+In headless software rendering, a continuous zoom across the busiest scene holds 60 fps for 97–99% of frames.
 
 **Occlusion.** Solid props register picture-space occluders. `kit.visibility(x, y)` samples points over a standing person to work out how much of them the camera can see. Activity spots that would be hidden are removed. People never idle out of sight, and Mr. Wiggles always spawns in view. Path costs through hidden ground are tripled, so people only pass behind things briefly. Tests cap how long Mr. Wiggles can stay hidden.
 

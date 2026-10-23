@@ -121,7 +121,7 @@ function renderThumb(scene, canvas) {
   const camera = createCamera({ viewW: canvas.width, viewH: canvas.height, worldW: world.pictureWidth, worldH: world.pictureHeight });
   camera.minScale = 0;
   centreOn(camera, world.pictureWidth / 2, world.pictureHeight * 0.55, (canvas.width / world.pictureWidth) * 1.7);
-  createRenderer(canvas, world, { dpr: 1 }).render(camera, world.time);
+  createRenderer(canvas, world, { dpr: 1, people: 'simple' }).render(camera, world.time);
   const copy = document.createElement('canvas');
   copy.width = canvas.width;
   copy.height = canvas.height;
@@ -198,13 +198,17 @@ function openScene(id) {
   $('#start-blurb').textContent = scene.blurb;
   updateDifficultyLabels();
   openDialog($('#dlg-start'));
+  prepareGame();
 }
 
-function startGame() {
+/**
+ * Build the scene behind the start card so character sprites are warmed up
+ * before the clock starts. Rebuilt if settings change while the card is open.
+ */
+function prepareGame() {
   const scene = getScene(currentSceneId);
   const settings = store.getSettings();
   stopGame();
-  closeDialog($('#dlg-start'));
   game = createGame({
     canvas: $('#game-canvas'),
     scene,
@@ -216,6 +220,14 @@ function startGame() {
     onGuess: handleGuess,
     onAutoPause: pauseGame,
   });
+  game.preparedWith = `${settings.difficulty}|${settings.reducedMotion}`;
+}
+
+function startGame() {
+  const scene = getScene(currentSceneId);
+  const settings = store.getSettings();
+  closeDialog($('#dlg-start'));
+  if (!game || game.state !== 'ready' || game.preparedWith !== `${settings.difficulty}|${settings.reducedMotion}`) prepareGame();
   game.start();
   $('#hud-diff').textContent = getDifficulty(settings.difficulty).label;
   clearInterval(timerInterval);
@@ -349,6 +361,7 @@ $('#dlg-pause').addEventListener('cancel', (e) => {
 });
 $('#btn-restart').addEventListener('click', () => {
   closeDialog($('#dlg-pause'));
+  stopGame();
   startGame();
 });
 $('#btn-quit').addEventListener('click', () => {
@@ -396,6 +409,10 @@ $('#dlg-found').addEventListener('cancel', (e) => {
 
 $('#opt-motion').addEventListener('change', (e) => store.setReducedMotion(e.target.checked));
 $('#btn-settings-close').addEventListener('click', () => closeDialog($('#dlg-settings')));
+$('#dlg-settings').addEventListener('close', () => {
+  const s = store.getSettings();
+  if (game?.state === 'ready' && $('#dlg-start').open && game.preparedWith !== `${s.difficulty}|${s.reducedMotion}`) prepareGame();
+});
 $('#btn-reset').addEventListener('click', () => openDialog($('#dlg-confirm')));
 $('#btn-confirm-no').addEventListener('click', () => closeDialog($('#dlg-confirm')));
 $('#btn-confirm-yes').addEventListener('click', () => {

@@ -32,6 +32,7 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
   let crosshair = false;
   let last = performance.now();
   let frame = 0;
+  let slowFrames = 0;
   const markers = [];
   const confetti = [];
 
@@ -157,7 +158,8 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
 
   function loop(now) {
     if (state === 'destroyed') return;
-    const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+    const rawMs = now - last;
+    const dt = Math.min(0.05, Math.max(0, rawMs / 1000));
     last = now;
     if (state === 'running') {
       elapsed += dt * 1000;
@@ -172,6 +174,12 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
       }
     }
     stepTween(now);
+    // Sprite preparation budget: generous while the start card hides the scene,
+    // then adaptive so a heavy frame is followed by a lighter one.
+    slowFrames = rawMs > 24 ? Math.min(30, slowFrames + 3) : Math.max(0, slowFrames - 1);
+    if (state === 'ready') renderer.setSpriteBudget(22, 48);
+    else if (slowFrames > 6) renderer.setSpriteBudget(2, 1);
+    else renderer.setSpriteBudget(5, 4);
     renderer.render(camera, world.time, overlay);
     if (state !== 'paused') frame = requestAnimationFrame(loop);
   }
@@ -254,6 +262,9 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
     camera,
     get state() {
       return state;
+    },
+    get sprites() {
+      return renderer.sprites;
     },
     get elapsed() {
       return elapsed;

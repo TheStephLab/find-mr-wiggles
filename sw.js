@@ -1,5 +1,5 @@
 /* Offline support: precache the app shell, then serve cache-first and refresh in the background. */
-const VERSION = 'wiggles-v2';
+const VERSION = 'wiggles-v3';
 const SHELL = [
   './',
   './index.html',
@@ -20,6 +20,11 @@ const SHELL = [
   './js/core/storage.js',
   './js/game/agents.js',
   './js/game/draw-person.js',
+  './js/game/figure/core.js',
+  './js/game/figure/head.js',
+  './js/game/figure/clothes.js',
+  './js/game/figure/items.js',
+  './js/game/sprite-cache.js',
   './js/game/game.js',
   './js/game/input.js',
   './js/game/people.js',

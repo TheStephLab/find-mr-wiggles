@@ -2,11 +2,11 @@ import { visibleRect } from '../core/camera.js';
 import { rectsOverlap } from '../core/geometry.js';
 import { drawPerson } from './draw-person.js';
 import { agentPose, agentBounds } from './agents.js';
+import { createSpriteCache } from './sprite-cache.js';
 
 const MAX_CACHE_PIXELS = 9_000_000; // stays well under mobile canvas limits
 const MAX_DETAIL_PIXELS = 6_000_000;
-const LOD_SIMPLE_PX = 22; // characters shorter than this on screen are drawn as blocks
-const LOD_MEDIUM_PX = 60; // …and shorter than this without outlines and fine patterns
+const TINY_PX = 7; // characters shorter than this on screen are drawn as simple blocks
 const SETTLE_MS = 120; // rebuild the sharp close-up floor once the camera pauses
 
 /**
@@ -16,8 +16,13 @@ const SETTLE_MS = 120; // rebuild the sharp close-up floor once the camera pause
  * drawn in bands and warped into perspective strip by strip ("mode 7"). When
  * the player zooms in past that bitmap's resolution, a sharper copy of just
  * the visible region is rebuilt after the camera settles.
+ *
+ * Characters come from a sprite cache (see sprite-cache.js) so hundreds of
+ * detailed people cost little more than hundreds of drawImage calls.
+ * Options: `sprites: false` draws people directly; `people: 'simple'` draws
+ * cheap blocks (used for tiny thumbnails).
  */
-export function createRenderer(canvas, world, { dpr: fixedDpr } = {}) {
+export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprites = true, people = 'full', spriteBudgetMs = 6 } = {}) {
   const ctx = canvas.getContext('2d', { alpha: false });
   const { P } = world;
   const PW = P.width;
@@ -27,6 +32,9 @@ export function createRenderer(canvas, world, { dpr: fixedDpr } = {}) {
   let detail = null;
   let camKey = '';
   let camChangedAt = 0;
+  let budgetMs = spriteBudgetMs;
+  let budgetCount = Infinity;
+  const sprites = useSprites && people !== 'simple' ? createSpriteCache() : null;
   const drawList = [];
   const segments = levelSegments(world);
 
@@ -161,14 +169,36 @@ export function createRenderer(canvas, world, { dpr: fixedDpr } = {}) {
     for (const p of world.props) if (rectsOverlap(p.bounds, view)) drawList.push(p);
     for (const a of world.agents) if (rectsOverlap(agentBounds(a, P), view)) drawList.push(a);
     drawList.sort((a, b) => a.sortY - b.sortY);
+    sprites?.beginFrame(budgetMs, budgetCount);
+    const ex = -camera.x * s;
+    const ey = -camera.y * s;
     for (const item of drawList) {
-      if (item.look) {
-        const k = P.s(item.y);
-        const px = camera.scale * 40 * k;
-        const lod = px < LOD_SIMPLE_PX ? 'simple' : px < LOD_MEDIUM_PX ? 'medium' : 'full';
-        drawPerson(ctx, item.look, agentPose(item, t), P.X(item.x, item.y), P.Y(item.y, item.z ?? 0), lod, k);
-      } else {
+      if (!item.look) {
         item.draw(ctx, t, P);
+        continue;
+      }
+      const k = P.s(item.y);
+      const px = P.X(item.x, item.y);
+      const py = P.Y(item.y, item.z ?? 0);
+      const pose = agentPose(item, t);
+      if (people === 'simple' || camera.scale * 40 * k < TINY_PX) {
+        drawPerson(ctx, item.look, pose, px, py, 'simple', k);
+        continue;
+      }
+      if (!sprites) {
+        drawPerson(ctx, item.look, pose, px, py, 'full', k);
+        continue;
+      }
+      const hit = sprites.get(item.look, pose, s * k);
+      if (!hit) {
+        drawPerson(ctx, item.look, pose, px, py, 'simple', k);
+      } else if (hit.direct) {
+        drawPerson(ctx, item.look, pose, px, py, 'full', k);
+      } else {
+        const e = hit.entry;
+        if (hit.mirror) ctx.setTransform(-s, 0, 0, s, 2 * px * s + ex, ey);
+        ctx.drawImage(e.page.canvas, e.sx, e.sy, e.sw, e.sh, px + e.L * k, py + e.T * k, e.W * k, e.H * k);
+        if (hit.mirror) ctx.setTransform(s, 0, 0, s, ex, ey);
       }
     }
 
@@ -177,6 +207,12 @@ export function createRenderer(canvas, world, { dpr: fixedDpr } = {}) {
 
   return {
     render,
+    sprites,
+    /** Time (ms) and number of new character sprites allowed per frame. */
+    setSpriteBudget(ms, count = Infinity) {
+      budgetMs = ms;
+      budgetCount = count;
+    },
     invalidate() {
       base = null;
       detail = null;
