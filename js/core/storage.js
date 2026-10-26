@@ -1,4 +1,5 @@
 import { clampLevel, DEFAULT_LEVEL } from './difficulty.js';
+import { MODES, normaliseMode } from './mode.js';
 
 /**
  * Local-only progress persistence (no accounts). Everything lives under one
@@ -6,13 +7,13 @@ import { clampLevel, DEFAULT_LEVEL } from './difficulty.js';
  * localStorage is unavailable (e.g. private browsing or blocked cookies).
  */
 export const STORAGE_KEY = 'find-mr-wiggles:progress';
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export function defaultState() {
   return {
     version: SCHEMA_VERSION,
-    settings: { difficulty: DEFAULT_LEVEL, reducedMotion: false },
-    scenes: {},
+    settings: { difficulty: DEFAULT_LEVEL, reducedMotion: false, mode: 'animated' },
+    modes: { animated: { scenes: {} }, classic: { scenes: {} } },
   };
 }
 
@@ -66,15 +67,19 @@ export function parseState(json) {
   } catch {
     return state;
   }
-  if (!raw || typeof raw !== 'object' || raw.version !== SCHEMA_VERSION) return state;
+  if (!raw || typeof raw !== 'object' || ![1, SCHEMA_VERSION].includes(raw.version)) return state;
   if (raw.settings && typeof raw.settings === 'object') {
     state.settings.difficulty = clampLevel(raw.settings.difficulty ?? DEFAULT_LEVEL);
     state.settings.reducedMotion = Boolean(raw.settings.reducedMotion);
+    state.settings.mode = raw.version === 1 ? 'animated' : normaliseMode(raw.settings.mode);
   }
-  if (raw.scenes && typeof raw.scenes === 'object') {
-    for (const [id, rec] of Object.entries(raw.scenes)) {
-      const clean = sanitiseSceneRecord(rec);
-      if (clean) state.scenes[id] = clean;
+  for (const mode of MODES) {
+    const scenes = raw.version === 1 ? (mode === 'animated' ? raw.scenes : null) : raw.modes?.[mode]?.scenes;
+    if (scenes && typeof scenes === 'object') {
+      for (const [id, rec] of Object.entries(scenes)) {
+        const clean = sanitiseSceneRecord(rec);
+        if (clean) state.modes[mode].scenes[id] = clean;
+      }
     }
   }
   return state;
@@ -113,31 +118,41 @@ export function createProgressStore({ storage, key = STORAGE_KEY } = {}) {
       persist();
     },
 
-    getScene(id) {
-      return state.scenes[id] ? structuredClone(state.scenes[id]) : null;
+    setMode(mode) {
+      state.settings.mode = normaliseMode(mode);
+      persist();
+      return state.settings.mode;
     },
 
-    isCompleted: (id) => Boolean(state.scenes[id]?.completed),
+    getScene(id, mode = state.settings.mode) {
+      const rec = state.modes[normaliseMode(mode)].scenes[id];
+      return rec ? structuredClone(rec) : null;
+    },
+
+    isCompleted: (id, mode = state.settings.mode) => Boolean(state.modes[normaliseMode(mode)].scenes[id]?.completed),
 
     /** Scenes unlock in order: the first is always open; each completion opens the next. */
-    isUnlocked(sceneIds, id) {
+    isUnlocked(sceneIds, id, mode = state.settings.mode) {
+      const scenes = state.modes[normaliseMode(mode)].scenes;
       const index = sceneIds.indexOf(id);
       if (index < 0) return false;
-      if (index === 0 || state.scenes[id]?.completed) return true;
-      return Boolean(state.scenes[sceneIds[index - 1]]?.completed);
+      if (index === 0 || scenes[id]?.completed) return true;
+      return Boolean(scenes[sceneIds[index - 1]]?.completed);
     },
 
     /** The scene "Play" should launch: first incomplete unlocked scene, else the first. */
-    nextSceneId(sceneIds) {
+    nextSceneId(sceneIds, mode = state.settings.mode) {
+      const scenes = state.modes[normaliseMode(mode)].scenes;
       for (const id of sceneIds) {
-        if (!state.scenes[id]?.completed) return this.isUnlocked(sceneIds, id) ? id : sceneIds[0];
+        if (!scenes[id]?.completed) return this.isUnlocked(sceneIds, id, mode) ? id : sceneIds[0];
       }
       return sceneIds[0];
     },
 
-    recordCompletion(id, { timeMs, difficulty, hintsUsed = 0, misses = 0, now = new Date() }) {
+    recordCompletion(id, { timeMs, difficulty, mode = state.settings.mode, hintsUsed = 0, misses = 0, now = new Date() }) {
+      const scenes = state.modes[normaliseMode(mode)].scenes;
       const level = clampLevel(difficulty);
-      const rec = state.scenes[id] ?? { completed: false, plays: 0, best: {}, stars: 0, lastCompletedAt: null };
+      const rec = scenes[id] ?? { completed: false, plays: 0, best: {}, stars: 0, lastCompletedAt: null };
       const previousBest = rec.best[level];
       const isBest = !previousBest || timeMs < previousBest;
       const stars = starsFor({ hintsUsed, misses });
@@ -146,7 +161,7 @@ export function createProgressStore({ storage, key = STORAGE_KEY } = {}) {
       if (isBest) rec.best[level] = Math.round(timeMs);
       rec.stars = Math.max(rec.stars, stars);
       rec.lastCompletedAt = now.toISOString();
-      state.scenes[id] = rec;
+      scenes[id] = rec;
       persist();
       return { isBest, stars, previousBest: previousBest ?? null };
     },

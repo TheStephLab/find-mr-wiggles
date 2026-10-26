@@ -3,6 +3,8 @@ import { getDifficulty, worldSize, crowdSize } from '../core/difficulty.js';
 import { createKit } from '../scenes/kit.js';
 import { createAgent, updateAgent, servedByQueue, agentBounds, planPath } from './agents.js';
 import { createCrowdLook, WIGGLES_LOOK, pickName } from './people.js';
+import { normaliseMode } from '../core/mode.js';
+import { composeClassic } from './classic.js';
 
 /**
  * Build a playable world from a scene definition.
@@ -12,11 +14,12 @@ import { createCrowdLook, WIGGLES_LOOK, pickName } from './people.js';
  * World coordinates are the ground plan (x, y) plus height z; `world.P`
  * projects them into the perspective picture the camera looks at.
  */
-export function createWorld(scene, { level = 3, seed, perfFactor = 1 } = {}) {
+export function createWorld(scene, { level = 3, seed, perfFactor = 1, mode = 'animated' } = {}) {
+  mode = normaliseMode(mode);
   const difficulty = getDifficulty(level);
   const { width, height } = worldSize(difficulty, scene.aspect);
   const rng = createRng(seed);
-  const kit = createKit({ rng, width, height, difficulty, view: scene.view });
+  const kit = createKit({ rng, width, height, difficulty, view: scene.view, mode });
   scene.build(kit);
   kit.finalize();
 
@@ -27,6 +30,7 @@ export function createWorld(scene, { level = 3, seed, perfFactor = 1 } = {}) {
 
   const world = {
     scene,
+    mode,
     seed: rng.seed,
     difficulty,
     width,
@@ -119,6 +123,7 @@ export function createWorld(scene, { level = 3, seed, perfFactor = 1 } = {}) {
   world.wiggles = wiggles;
 
   world.update = (dt) => {
+    if (mode === 'classic') return;
     world.time += dt;
     for (const d of world.dynamic) d.update?.(dt, world.time);
     for (const q of world.queues) {
@@ -155,5 +160,6 @@ export function createWorld(scene, { level = 3, seed, perfFactor = 1 } = {}) {
     a.sortY = a.y + a.sortBias;
     a.z = kit.zAt(a.x, a.y);
   }
+  if (mode === 'classic') composeClassic(world, kit);
   return world;
 }

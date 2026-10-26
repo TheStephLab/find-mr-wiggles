@@ -105,6 +105,19 @@ button {
   white-space: nowrap;
 }
 
+.mode-note {
+  border: var(--stitch);
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+  background: var(--paper-deep);
+  font-size: 0.95rem;
+}
+
+.settings-note {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
 [hidden] {
   display: none !important;
 }
@@ -847,7 +860,7 @@ kbd {
     flex-direction: column;
   }
   .hud-diff {
-    display: none;
+    font-size: 0.7rem;
   }
   .found-stats dd {
     font-size: 1.15rem;

@@ -63,7 +63,7 @@ for (const scene of SCENES) {
     const movers = world.agents.filter((a) => Math.hypot(a.x - start.get(a).x, a.y - start.get(a).y) > 30).length;
     assert.ok(movers > world.agents.length * 0.5, `only ${movers} of ${world.agents.length} moved`);
     const changedLevel = [...levelsVisited.values()].filter((s) => s.size > 1).length;
-    assert.ok(changedLevel > 0, 'someone used an escalator');
+    if (world.levels.length > 1) assert.ok(changedLevel > 0, 'someone used an escalator');
     const queued = world.queues.reduce((n, q) => n + q.length, 0);
     assert.ok(queued < world.agents.length * 0.5, 'queues are not swallowing the crowd');
   });

@@ -27,16 +27,28 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
   const { P } = world;
   const PW = P.width;
   const PH = P.height;
-  const baseScale = Math.min(2, Math.sqrt(MAX_CACHE_PIXELS / (PW * PH)));
+  const baseScale = Math.min(2, Math.sqrt((people === 'simple' ? 500_000 : MAX_CACHE_PIXELS) / (PW * PH)));
   let base = null;
   let detail = null;
   let camKey = '';
   let camChangedAt = 0;
   let budgetMs = spriteBudgetMs;
   let budgetCount = Infinity;
+  let needsRefine = true;
+  let floorPending = false;
+  const stats = { frames: 0 };
   const sprites = useSprites && people !== 'simple' ? createSpriteCache() : null;
   const drawList = [];
+  const requests = [];
+  const poses = new Map();
   const segments = levelSegments(world);
+  const illustration = world.mode === 'classic' ? [...world.props, ...world.agents, ...world.dynamic.flatMap(d => d.parts?.() ?? [])].sort((a, b) => a.sortY - b.sortY) : null;
+  const illustrationBounds = new WeakMap();
+  const illustrationPoses = new WeakMap();
+  for (const item of illustration ?? []) {
+    illustrationBounds.set(item, item.look ? agentBounds(item, P) : item.bounds);
+    if (item.look) illustrationPoses.set(item, agentPose(item, world.time));
+  }
 
   function makeCanvas(w, h) {
     return typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
@@ -114,8 +126,9 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
   }
 
   function chooseFloor(camera, s, view, now) {
+    floorPending = false;
     if (!base) base = renderRegion({ x: 0, y: 0, w: PW, h: PH }, baseScale);
-    if (s <= baseScale * 1.35) return base;
+    if (people === 'simple' || s <= baseScale * 1.35) return base;
     const key = `${camera.x.toFixed(1)}|${camera.y.toFixed(1)}|${camera.scale.toFixed(3)}`;
     if (key !== camKey) {
       camKey = key;
@@ -123,6 +136,7 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
     }
     const fits = detail && detail.scale >= s * 0.75 && detail.scale <= s * 1.8 && contains(detail.rect, view);
     if (fits) return detail;
+    floorPending = now - camChangedAt < SETTLE_MS;
     if (now - camChangedAt >= SETTLE_MS) {
       const pad = 0.2;
       const rect = clampRect({ x: view.x - view.w * pad, y: view.y - view.h * pad, w: view.w * (1 + pad * 2), h: view.h * (1 + pad * 2) }, PW, PH);
@@ -146,6 +160,10 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
   }
 
   function render(camera, t, overlay) {
+    stats.frames++;
+    if (world.mode === 'classic') t = world.time;
+    const detailed = (item) => world.mode === 'classic' || camera.scale * 40 * P.s(item.y) >= TINY_PX;
+    const density = (item) => Math.max(world.mode === 'classic' ? 1 : 0, s * P.s(item.y));
     const dpr = fixedDpr ?? Math.min(globalThis.devicePixelRatio || 1, 2.5);
     const s = camera.scale * dpr;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -161,17 +179,33 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
     drawList.length = 0;
     for (const d of world.dynamic) {
       if (d.parts) {
-        for (const part of d.parts()) if (rectsOverlap(part.bounds, view)) drawList.push(part);
+        if (!illustration) for (const part of d.parts()) if (rectsOverlap(part.bounds, view)) drawList.push(part);
       } else if (!d.bounds || rectsOverlap(d.bounds, view)) {
         d.draw(ctx, t, P);
       }
     }
-    for (const p of world.props) if (rectsOverlap(p.bounds, view)) drawList.push(p);
-    for (const a of world.agents) if (rectsOverlap(agentBounds(a, P), view)) drawList.push(a);
-    drawList.sort((a, b) => a.sortY - b.sortY);
+    if (illustration) {
+      for (const item of illustration) if (rectsOverlap(illustrationBounds.get(item), view)) drawList.push(item);
+    } else {
+      for (const p of world.props) if (rectsOverlap(p.bounds, view)) drawList.push(p);
+      for (const a of world.agents) if (rectsOverlap(agentBounds(a, P), view)) drawList.push(a);
+      drawList.sort((a, b) => a.sortY - b.sortY);
+    }
     sprites?.beginFrame(budgetMs, budgetCount);
+    requests.length = 0;
+    poses.clear();
+    if (sprites) {
+      for (const item of drawList) {
+        if (!item.look || !detailed(item)) continue;
+        const pose = illustrationPoses.get(item) ?? agentPose(item, t);
+        poses.set(item, pose);
+        requests.push({ look: item.look, pose, q: density(item) });
+      }
+      sprites.prepare(requests);
+    }
     const ex = -camera.x * s;
     const ey = -camera.y * s;
+    needsRefine = floorPending;
     for (const item of drawList) {
       if (!item.look) {
         item.draw(ctx, t, P);
@@ -180,8 +214,8 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
       const k = P.s(item.y);
       const px = P.X(item.x, item.y);
       const py = P.Y(item.y, item.z ?? 0);
-      const pose = agentPose(item, t);
-      if (people === 'simple' || camera.scale * 40 * k < TINY_PX) {
+      const pose = poses.get(item) ?? agentPose(item, t);
+      if (people === 'simple' || !detailed(item)) {
         drawPerson(ctx, item.look, pose, px, py, 'simple', k);
         continue;
       }
@@ -189,7 +223,8 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
         drawPerson(ctx, item.look, pose, px, py, 'full', k);
         continue;
       }
-      const hit = sprites.get(item.look, pose, s * k);
+      const hit = sprites.get(item.look, pose, density(item), false);
+      if (!hit || (hit.entry && !hit.exact)) needsRefine = true;
       if (!hit) {
         drawPerson(ctx, item.look, pose, px, py, 'simple', k);
       } else if (hit.direct) {
@@ -208,6 +243,9 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
   return {
     render,
     sprites,
+    stats,
+    get needsRefine() { return needsRefine; },
+    get cachePixels() { return (base?.canvas.width * base?.canvas.height || 0) + (detail?.canvas.width * detail?.canvas.height || 0) + (sprites?.pageCount ?? 0) * 1024 ** 2; },
     /** Time (ms) and number of new character sprites allowed per frame. */
     setSpriteBudget(ms, count = Infinity) {
       budgetMs = ms;

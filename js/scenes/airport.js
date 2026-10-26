@@ -3,6 +3,7 @@ import { gridLines, box, text, frontWall, infoDesk3d, OUT } from './props.js';
 import { drawBox, onFront, poly, sideQuad } from './draw3d.js';
 import { projectBox } from '../core/projection.js';
 import { CLOTHES } from '../game/people.js';
+import { AIRCRAFT_BOUNDS, drawAircraft } from './transport.js';
 
 const AIRLINES = [
   { name: 'Puffin Air', body: '#ffffff', stripe: '#1f6fbf', tail: '#f2a33a' },
@@ -68,7 +69,7 @@ export const airport = {
       ctx.fillRect(0, apronBot, W, winBot - apronBot);
     });
     for (const p of parked) {
-      kit.addProp({ y: p.y, box: { x: p.x - 125, y: p.y - 4, w: 250, d: 8, h: 95, z: E }, draw: (ctx) => onFront(ctx, P, p.x, p.y, E, (c) => drawPlane(c, 0.95, p.facing, p.airline)) });
+      kit.addProp({ y: p.y, box: { x: p.x + AIRCRAFT_BOUNDS.x, y: p.y - 4, w: AIRCRAFT_BOUNDS.w, d: 8, h: AIRCRAFT_BOUNDS.h, z: E - 20 }, draw: (ctx) => onFront(ctx, P, p.x, p.y, E, (c) => drawAircraft(c, .95, p.facing, p.airline)) });
       const doorX = p.x + p.facing * 70;
       kit.addProp({
         y: apronBot,
@@ -395,55 +396,6 @@ function airportBackdrop(ctx, P, W, H, winBot, divTop) {
   }
 }
 
-function drawPlane(c, s, facing, airline) {
-  c.save();
-  c.scale(s * facing, s);
-  const L = 230;
-  c.fillStyle = 'rgba(0,0,0,0.18)';
-  c.beginPath();
-  c.ellipse(0, 2, L * 0.45, 8, 0, 0, Math.PI * 2);
-  c.fill();
-  c.fillStyle = '#333';
-  for (const wx of [-60, 70]) {
-    c.fillRect(wx - 1, -12, 2, 12);
-    c.beginPath();
-    c.arc(wx, 0, 3.4, 0, Math.PI * 2);
-    c.fill();
-  }
-  c.beginPath();
-  c.moveTo(-L / 2 + 10, -38);
-  c.lineTo(-L / 2 - 4, -84);
-  c.lineTo(-L / 2 + 22, -84);
-  c.lineTo(-L / 2 + 46, -38);
-  c.closePath();
-  c.fillStyle = airline.tail;
-  c.fill();
-  c.strokeStyle = OUT;
-  c.lineWidth = 1;
-  c.stroke();
-  box(c, -L / 2, -42, L, 30, airline.body, OUT, 1.2, 15);
-  c.fillStyle = airline.stripe;
-  c.fillRect(-L / 2 + 8, -22, L - 22, 4);
-  c.fillStyle = '#2a3440';
-  for (let wx = -L / 2 + 34; wx < L / 2 - 30; wx += 9) c.fillRect(wx, -33, 4, 5);
-  c.fillRect(L / 2 - 20, -36, 11, 6);
-  c.save();
-  c.scale(facing, 1);
-  text(c, airline.name, 0, -36, { size: 7, colour: airline.stripe });
-  c.restore();
-  c.beginPath();
-  c.moveTo(-40, -16);
-  c.lineTo(20, -16);
-  c.lineTo(-6, 6);
-  c.lineTo(-66, 6);
-  c.closePath();
-  c.fillStyle = '#9aa3ad';
-  c.fill();
-  c.stroke();
-  box(c, -34, -10, 34, 12, '#c9ced6', OUT, 0.8, 6);
-  c.restore();
-}
-
 function createTaxiingPlane(rng, P, W, y) {
   const st = { x: -300, dir: 1, airline: rng.pick(AIRLINES), wait: rng.range(0, 6) };
   return {
@@ -463,9 +415,9 @@ function createTaxiingPlane(rng, P, W, y) {
       if (st.wait > 0) return [];
       return [{
         sortY: y,
-        bounds: projectBox(P, { x: st.x - 100, y, w: 200, d: 1, h: 80, z: E }, 6),
+        bounds: projectBox(P, { x: st.x + AIRCRAFT_BOUNDS.x * .8, y, w: AIRCRAFT_BOUNDS.w * .8, d: 1, h: AIRCRAFT_BOUNDS.h * .8, z: E - 20 * .8 }, 6),
         draw: (ctx, t) => onFront(ctx, P, st.x, y, E, (c) => {
-          drawPlane(c, 0.8, st.dir, st.airline);
+          drawAircraft(c, .8, st.dir, st.airline);
           if (Math.floor(t * 2) % 2) {
             c.fillStyle = '#ff3b3b';
             c.beginPath();
@@ -646,4 +598,3 @@ function playArea(kit, P, x, y) {
   }
   kit.poi({ x: x - 12, y: y + h / 2, facing: 'right', actions: ['phone', null], duration: [10, 20], weight: 1.2 });
 }
-

@@ -24,12 +24,12 @@ test('defaults when storage is empty', () => {
 });
 
 test('corrupt or foreign data falls back to defaults', () => {
-  assert.equal(parseState('{not json').version, 1);
-  assert.deepEqual(parseState(JSON.stringify({ version: 99, scenes: { x: {} } })).scenes, {});
+  assert.equal(parseState('{not json').version, 2);
+  assert.deepEqual(parseState(JSON.stringify({ version: 99, scenes: { x: {} } })).modes.animated.scenes, {});
   const s = parseState(JSON.stringify({ version: 1, settings: { difficulty: 42 }, scenes: { station: { completed: 'yes', best: { 3: -5, 2: 1234 } } } }));
   assert.equal(s.settings.difficulty, 5);
-  assert.equal(s.scenes.station.completed, true);
-  assert.deepEqual(s.scenes.station.best, { 2: 1234 });
+  assert.equal(s.modes.animated.scenes.station.completed, true);
+  assert.deepEqual(s.modes.animated.scenes.station.best, { 2: 1234 });
 });
 
 test('completing a scene unlocks the next and persists', () => {
@@ -87,4 +87,36 @@ test('formatTime and stars', () => {
   assert.equal(starsFor({ hintsUsed: 0, misses: 0 }), 3);
   assert.equal(starsFor({ hintsUsed: 1, misses: 3 }), 2);
   assert.equal(starsFor({ hintsUsed: 3, misses: 0 }), 1);
+});
+
+test('legacy progress migrates losslessly into Animated and persists mode independently of reduced motion', () => {
+  const record = { completed: true, plays: 7, stars: 3, best: { 1: 1500, 3: 67890 }, lastCompletedAt: '2026-10-22T10:00:00.000Z' };
+  const storage = fakeStorage({ [STORAGE_KEY]: JSON.stringify({ version: 1, settings: { difficulty: 4, reducedMotion: true }, scenes: { station: record } }) });
+  const store = createProgressStore({ storage });
+  assert.equal(store.getSettings().mode, 'animated');
+  assert.deepEqual(store.getScene('station'), record);
+  store.setMode('classic');
+  assert.equal(store.getSettings().reducedMotion, true);
+  assert.equal(store.isCompleted('station'), false);
+  assert.equal(store.nextSceneId(IDS), 'station');
+  assert.equal(store.isUnlocked(IDS, 'airport'), false);
+  const reload = createProgressStore({ storage });
+  assert.equal(reload.getSettings().mode, 'classic');
+  assert.deepEqual(reload.getScene('station', 'animated'), record);
+});
+
+test('completion, bests and unlocks are isolated by the run mode, not the current settings', () => {
+  const store = createProgressStore({ storage: fakeStorage() });
+  store.recordCompletion('station', { timeMs: 9000, difficulty: 3, mode: 'animated' });
+  store.setMode('classic');
+  store.recordCompletion('station', { timeMs: 10000, difficulty: 3, mode: 'classic' });
+  store.recordCompletion('airport', { timeMs: 5000, difficulty: 2, mode: 'animated' });
+  assert.equal(store.getScene('station').best[3], 10000);
+  assert.equal(store.getScene('station', 'animated').best[3], 9000);
+  assert.equal(store.isUnlocked(IDS, 'fair'), false);
+  assert.equal(store.isUnlocked(IDS, 'fair', 'animated'), true);
+  store.reset();
+  assert.equal(store.isCompleted('station', 'animated'), false);
+  assert.equal(store.isCompleted('station', 'classic'), false);
+  assert.equal(store.getSettings().mode, 'classic');
 });
