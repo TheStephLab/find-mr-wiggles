@@ -30,7 +30,7 @@
           <button id="btn-howto" class="btn btn-ghost" type="button">How to play</button>
           <button id="btn-settings" class="btn btn-ghost" type="button">Settings</button>
         </div>
-        <p class="home-meta"><span id="home-difficulty"></span> · <span id="home-progress"></span></p>
+        <p class="home-meta"><strong id="home-mode"></strong> · <span id="home-difficulty"></span> · <span id="home-progress"></span></p>
       </div>
     </section>
 
@@ -42,7 +42,7 @@
         <button id="btn-scenes-settings" class="btn btn-ghost" type="button">Settings</button>
       </header>
       <ul id="scene-list" class="scene-grid" role="list"></ul>
-      <p class="coming-soon">More places coming soon: fairgrounds, cruise ships, shopping centres, parks and sleepy villages…</p>
+      <p id="scenes-mode" class="coming-soon"></p>
     </section>
 
     <!-- Game -->
@@ -75,6 +75,8 @@
     <p id="start-kind" class="eyebrow"></p>
     <h2 id="start-title"></h2>
     <p id="start-blurb"></p>
+    <p id="start-mode" class="mode-note"></p>
+    <p id="start-readiness" class="settings-note" role="status"></p>
     <div class="start-body">
       <canvas id="start-portrait" class="portrait portrait-small" width="150" height="190" aria-hidden="true"></canvas>
       <ul class="traits">
@@ -110,16 +112,24 @@
 
   <dialog id="dlg-pause" class="dialog" aria-labelledby="pause-title">
     <h2 id="pause-title">Paused</h2>
-    <p>The clock has stopped. Mr. Wiggles is hiding in the crowd…</p>
+    <p>The clock has stopped. Your puzzle is waiting exactly where you left it.</p>
     <div class="actions actions-col">
       <button id="btn-resume" class="btn btn-primary" type="button">Resume</button>
       <button id="btn-restart" class="btn" type="button">New game (Mr. Wiggles moves)</button>
+      <button id="btn-pause-settings" class="btn" type="button">Settings / change mode</button>
       <button id="btn-quit" class="btn btn-ghost" type="button">Quit to scenes</button>
     </div>
   </dialog>
 
   <dialog id="dlg-settings" class="dialog" aria-labelledby="settings-title">
     <h2 id="settings-title">Settings</h2>
+    <label class="toggle">
+      <input id="opt-classic" type="checkbox" aria-describedby="classic-description">
+      <span>Classic Mode</span>
+    </label>
+    <p id="classic-description" class="settings-note">Five still, crowded storybook illustrations. Everyone stays in place while you search. Off: animated scenes with moving crowds. Each mode has its own unlocks and best times.</p>
+    <p class="settings-note">Changing mode ends the current search and starts a fresh puzzle after you press Done. Your saved results are kept.</p>
+    <p id="settings-mode-status" role="status" class="settings-note"></p>
     <fieldset class="difficulty">
       <legend>Difficulty</legend>
       <div id="difficulty-options" class="difficulty-options"></div>
@@ -148,13 +158,14 @@
   <dialog id="dlg-howto" class="dialog" aria-labelledby="howto-title">
     <h2 id="howto-title">How to play</h2>
     <ol class="howto">
-      <li>Mr. Wiggles is somewhere in every scene, and like everyone else he's <strong>on the move</strong>. He may slip behind a kiosk or pillar, but he never stays hidden for long.</li>
+      <li><strong>Animated:</strong> Mr. Wiggles moves with the crowd. He may slip behind a kiosk or pillar, but always reappears.</li>
+      <li><strong>Classic Mode:</strong> search five original, densely composed still illustrations. People, rides and vehicles stay frozen; the clock, camera and hints still work. Turn it on in Settings.</li>
       <li><strong>Pinch</strong> or <strong>scroll</strong> to zoom, <strong>drag</strong> to look around.</li>
       <li><strong>Tap</strong> him when you spot him. Tapping the wrong person counts as a wrong guess.</li>
       <li>Stuck? A <strong>Hint</strong> circles the area he's in, but costs you a star.</li>
-      <li>Keyboard: arrows to pan, <kbd>+</kbd>/<kbd>−</kbd> to zoom, <kbd>Enter</kbd> to check the crosshair.</li>
+      <li>Keyboard: arrows or WASD to pan (move the crosshair at picture edges), <kbd>+</kbd>/<kbd>−</kbd> to zoom, <kbd>Enter</kbd> to check the crosshair.</li>
     </ol>
-    <p>Finish a scene to unlock the next. You can replay any scene you've completed. Progress is saved on this device only. No accounts needed.</p>
+    <p>Find him at the station, airport, Galleria, Market and Fairground. Finish a scene to unlock the next in that mode, or replay completed scenes for a new hiding place. Animated and Classic progress are saved separately on this device. No accounts needed.</p>
     <div class="actions"><button class="btn btn-primary" type="button" data-close>Got it</button></div>
   </dialog>
 

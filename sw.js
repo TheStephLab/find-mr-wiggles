@@ -1,5 +1,5 @@
 /* Offline support: precache the app shell, then serve cache-first and refresh in the background. */
-const VERSION = 'wiggles-v3';
+const VERSION = 'wiggles-v5';
 const SHELL = [
   './',
   './index.html',
@@ -18,6 +18,7 @@ const SHELL = [
   './js/core/projection.js',
   './js/core/rng.js',
   './js/core/storage.js',
+  './js/core/mode.js',
   './js/game/agents.js',
   './js/game/draw-person.js',
   './js/game/figure/core.js',
@@ -30,13 +31,19 @@ const SHELL = [
   './js/game/people.js',
   './js/game/renderer.js',
   './js/game/world.js',
+  './js/game/classic.js',
   './js/scenes/index.js',
   './js/scenes/kit.js',
   './js/scenes/builders.js',
   './js/scenes/draw3d.js',
   './js/scenes/props.js',
+  './js/scenes/transport.js',
   './js/scenes/train-station.js',
   './js/scenes/airport.js',
+  './js/scenes/venue-props.js',
+  './js/scenes/galleria.js',
+  './js/scenes/market.js',
+  './js/scenes/fairground.js',
 ];
 
 self.addEventListener('install', (event) => {

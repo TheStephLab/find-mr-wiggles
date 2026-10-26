@@ -55,6 +55,7 @@ export function spriteFrame(look, pose) {
   const c = look.carry;
   return {
     key: `${dir}|${mode}|${cyc}|${pose.action ?? ''}|${af}|${c ? c.type + (c.color ?? '') : ''}`,
+    family: `${dir}|${mode}|${pose.action ?? ''}|${c ? c.type + (c.color ?? '') : ''}`,
     mirror: pose.dir === 'left',
     pose: { dir, mode, phase: (cyc / WALK_FRAMES) * TAU, action: pose.action ?? null, anim: af / ACTION_FRAMES },
   };

@@ -314,7 +314,7 @@ export function updateAgent(agent, world, dt) {
 }
 
 export function agentPose(agent, t) {
-  return { dir: agent.dir, mode: agent.mode, phase: agent.phase, t, action: agent.action, seed: agent.seed };
+  return { dir: agent.dir, mode: agent.mode, phase: agent.phase, t: agent.poseTime ?? t, action: agent.action, seed: agent.seed };
 }
 
 /** Picture-space bounding box covering the head, hat and held items. */

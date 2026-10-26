@@ -7,7 +7,9 @@
  * blitted with drawImage.
  *
  * Smoothness rules:
- *  - new sprites are only rendered while the per-frame time budget lasts;
+ *  - coverage and sharpness are prepared fairly before animation refinements;
+ *  - preparation is bounded by time and a hard sprite count, with one render
+ *    allowed to make progress even when its estimated cost exceeds the budget;
  *  - otherwise the nearest cached scale or animation frame is reused, and
  *    the caller falls back to a cheap figure only if nothing is cached yet;
  *  - pages are recycled least-recently-used first, keeping memory bounded.
@@ -30,10 +32,13 @@ function makeCanvas(w, h) {
 export function createSpriteCache({ maxPages = defaultPages() } = {}) {
   const pages = [];
   const byLook = new WeakMap();
+  const preparedAt = new WeakMap();
   let tick = 0;
   let budgetEnd = 0;
   let rendersLeft = Infinity;
-  const stats = { rendered: 0, hits: 0, fallbacks: 0, misses: 0 };
+  let renderedThisFrame = 0;
+  let enabled = false;
+  const stats = { rendered: 0, hits: 0, fallbacks: 0, misses: 0, coarseFallbacks: 0 };
 
   function newPage() {
     const canvas = makeCanvas(PAGE, PAGE);
@@ -117,6 +122,56 @@ export function createSpriteCache({ maxPages = defaultPages() } = {}) {
     return best;
   };
 
+  function request(look, pose, q) {
+    const frame = spriteFrame(look, pose);
+    // Round up: even an exact hit must have enough pixels for the display.
+    const bucket = Math.ceil(Math.log2(Math.max(q, 1e-3)) * STEPS);
+    let frames = byLook.get(look);
+    if (!frames) byLook.set(look, (frames = new Map()));
+    let buckets = frames.get(frame.key);
+    if (!buckets) {
+      buckets = new Map();
+      buckets.family = frame.family;
+      frames.set(frame.key, buckets);
+    }
+    const hit = buckets.get(bucket);
+    if (hit === 'direct' || valid(hit)) return { look, frame, bucket, buckets, hit, best: hit };
+    let best = nearest(buckets, bucket);
+    const family = frame.family;
+    for (const [key, m] of frames) {
+      if (key === frame.key || m.family !== family) continue;
+      const e = nearest(m, bucket);
+      if (e && (!best || Math.abs(e.bucket - bucket) < Math.abs(best.bucket - bucket))) best = e;
+    }
+    return { look, frame, bucket, buckets, hit, best };
+  }
+
+  function obtain(r, allowRender) {
+    const { look, frame, bucket, buckets, hit, best } = r;
+    if (hit === 'direct') return { direct: true };
+    if (valid(hit)) return { entry: hit, mirror: frame.mirror, exact: true };
+    const qb = 2 ** (bucket / STEPS);
+    const bd = spriteBounds(look);
+    if ((bd.R - bd.L) * qb + 2 > PAGE / 2 || (bd.B - bd.T) * qb + 2 > PAGE / 2) {
+      buckets.set(bucket, 'direct');
+      return { direct: true };
+    }
+    const now = performance.now();
+    if (allowRender && enabled && rendersLeft > 0 && (renderedThisFrame === 0 || now + predict(look, bucket) <= budgetEnd)) {
+      rendersLeft--;
+      renderedThisFrame++;
+      const made = render(look, frame, bucket);
+      const took = performance.now() - now;
+      if (made && made !== 'direct') {
+        msPerPixel = Math.max(1e-6, msPerPixel * 0.9 + (Math.max(0, took - BASE_MS) / (made.sw * made.sh)) * 0.1);
+        buckets.set(bucket, made);
+        preparedAt.set(look, tick);
+        return { entry: made, mirror: frame.mirror, exact: true };
+      }
+    }
+    return valid(best) ? { entry: best, mirror: frame.mirror, exact: false } : null;
+  }
+
   return {
     stats,
     /**
@@ -128,66 +183,41 @@ export function createSpriteCache({ maxPages = defaultPages() } = {}) {
       tick++;
       budgetEnd = performance.now() + ms;
       rendersLeft = maxRenders;
+      renderedThisFrame = 0;
+      enabled = ms > 0;
+    },
+    /**
+     * Prepare the current visible requests before depth-ordered blitting.
+     * Missing people come first, then under-resolved sprites, then animation.
+     * Age breaks ties so the front/back of the crowd get the same treatment.
+     */
+    prepare(requests) {
+      const pending = requests.map(({ look, pose, q }) => request(look, pose, q))
+        .filter((r) => r.hit !== 'direct' && !valid(r.hit));
+      const priority = (r) => !r.best ? 0 : r.best.bucket < r.bucket - 1 ? 1 : 2;
+      pending.sort((a, b) => priority(a) - priority(b) || (preparedAt.get(a.look) ?? -1) - (preparedAt.get(b.look) ?? -1));
+      for (const r of pending) {
+        if (!enabled || rendersLeft <= 0 || (renderedThisFrame > 0 && performance.now() >= budgetEnd)) break;
+        obtain(r, true);
+      }
     },
     /**
      * Sprite for a pose at `q` device pixels per world unit.
      * Returns { entry, mirror } | { direct: true } | null (nothing usable yet).
      */
-    get(look, pose, q) {
-      const frame = spriteFrame(look, pose);
-      const bucket = Math.round(Math.log2(Math.max(q, 1e-3)) * STEPS);
-      let frames = byLook.get(look);
-      if (!frames) byLook.set(look, (frames = new Map()));
-      let buckets = frames.get(frame.key);
-      if (!buckets) frames.set(frame.key, (buckets = new Map()));
-      const hit = buckets.get(bucket);
-      if (hit === 'direct') return { direct: true };
-      if (valid(hit)) {
-        hit.page.used = tick;
-        stats.hits++;
-        return { entry: hit, mirror: frame.mirror };
-      }
-      const near = nearest(buckets, bucket);
-      const qb = 2 ** (bucket / STEPS);
-      const bd = spriteBounds(look);
-      if ((bd.R - bd.L) * qb + 2 > PAGE / 2 || (bd.B - bd.T) * qb + 2 > PAGE / 2) {
-        buckets.set(bucket, 'direct');
-        return { direct: true };
-      }
-      const now = performance.now();
-      // A sprite one scale step away looks fine for a moment, so the exact size is
-      // only prepared when there's plenty of budget (e.g. not mid-zoom).
-      const needed = predict(look, bucket) * (near && Math.abs(near.bucket - bucket) <= 1 ? 2 : 1);
-      if (rendersLeft > 0 && now + needed <= budgetEnd) {
-        rendersLeft--;
-        const made = render(look, frame, bucket);
-        const took = performance.now() - now;
-        if (made && made !== 'direct') msPerPixel = Math.max(1e-6, msPerPixel * 0.9 + (Math.max(0, took - BASE_MS) / (made.sw * made.sh)) * 0.1);
-        if (made === 'direct') {
-          buckets.set(bucket, 'direct');
-          return { direct: true };
-        }
-        if (made) {
-          buckets.set(bucket, made);
-          return { entry: made, mirror: frame.mirror };
+    get(look, pose, q, allowRender = true) {
+      const r = request(look, pose, q);
+      const result = obtain(r, allowRender);
+      if (!result) stats.misses++;
+      else if (result.entry) {
+        result.entry.page.used = tick;
+        if (result.exact) stats.hits++;
+        else {
+          stats.fallbacks++;
+          if (result.entry.bucket < r.bucket - 1) stats.coarseFallbacks++;
         }
       }
-      // Nearest cached scale of the same frame, then any frame in the same direction.
-      let best = near;
-      if (!best) {
-        const prefix = frame.key.slice(0, frame.key.indexOf('|', frame.key.indexOf('|') + 1));
-        for (const [key, m] of frames) {
-          if (!key.startsWith(prefix)) continue;
-          for (const e of m.values()) if (valid(e) && (!best || Math.abs(e.bucket - bucket) < Math.abs(best.bucket - bucket))) best = e;
-        }
-      }
-      if (best) {
-        best.page.used = tick;
-        stats.fallbacks++;
-        return { entry: best, mirror: frame.mirror };
-      }
-      stats.misses++;
-      return null;
+      return result;
     },
     get pageCount() {
       return pages.length;

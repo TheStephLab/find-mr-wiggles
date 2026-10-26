@@ -10,8 +10,9 @@ const DEFAULT_HINT_COOLDOWN_MS = 8000;
  * One play-through of a scene: owns the world, camera, render loop, timer,
  * guesses and hints. The UI layer talks to it through the returned API.
  */
-export function createGame({ canvas, scene, level, seed, perfFactor = 1, reducedMotion = false, onFound, onGuess, onAutoPause }) {
-  const world = createWorld(scene, { level, seed, perfFactor });
+export function createGame({ canvas, scene, level, seed, perfFactor = 1, reducedMotion = false, mode = 'animated', onFound, onGuess, onAutoPause }) {
+  const world = createWorld(scene, { level, seed, perfFactor, mode });
+  const classic = world.mode === 'classic';
   const renderer = createRenderer(canvas, world);
   const rect = canvas.getBoundingClientRect();
   const camera = createCamera({ viewW: rect.width || 800, viewH: rect.height || 600, worldW: world.pictureWidth, worldH: world.pictureHeight });
@@ -30,9 +31,12 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
   let hint = null;
   let tween = null;
   let crosshair = false;
+  let cursorX = camera.viewW / 2, cursorY = camera.viewH / 2;
   let last = performance.now();
   let frame = 0;
   let slowFrames = 0;
+  let dirty = true;
+  let renderedKey = '';
   const markers = [];
   const confetti = [];
 
@@ -43,6 +47,9 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
     canvas.width = Math.round(r.width * dpr);
     canvas.height = Math.round(r.height * dpr);
     resizeCamera(camera, r.width, r.height);
+    cursorX = r.width / 2;
+    cursorY = r.height / 2;
+    dirty = true;
   }
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(canvas);
@@ -135,8 +142,8 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       const dpr = canvas.width / cam.viewW;
-      const cx = canvas.width / 2;
-      const cy = canvas.height / 2;
+      const cx = cursorX * dpr;
+      const cy = cursorY * dpr;
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 3 * dpr;
       ctx.shadowColor = 'rgba(0,0,0,0.8)';
@@ -162,10 +169,10 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
     const dt = Math.min(0.05, Math.max(0, rawMs / 1000));
     last = now;
     if (state === 'running') {
-      elapsed += dt * 1000;
-      world.update(dt * speed);
+      elapsed += Math.max(0, rawMs);
+      if (!classic) world.update(dt * speed);
     } else if (state === 'found' || state === 'ready') {
-      world.update(dt * speed);
+      if (!classic) world.update(dt * speed);
       for (const p of confetti) {
         p.vy += 260 * dt;
         p.x += p.vx * dt;
@@ -180,7 +187,12 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
     if (state === 'ready') renderer.setSpriteBudget(22, 48);
     else if (slowFrames > 6) renderer.setSpriteBudget(2, 1);
     else renderer.setSpriteBudget(5, 4);
-    renderer.render(camera, world.time, overlay);
+    const key = `${camera.x}|${camera.y}|${camera.scale}|${canvas.width}|${canvas.height}`;
+    if (!classic || dirty || key !== renderedKey || renderer.needsRefine || tween || hint || markers.length || state === 'found') {
+      renderer.render(camera, world.time, (ctx, cam) => overlay(ctx, cam, now / 1000));
+      renderedKey = key;
+      dirty = false;
+    }
     if (state !== 'paused') frame = requestAnimationFrame(loop);
   }
 
@@ -195,6 +207,7 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
     }
     const person = world.agentAt(p.x, p.y, Math.min(5, 3 / camera.scale));
     markers.push({ x: p.x, y: p.y, t0: performance.now(), person: Boolean(person) });
+    dirty = true;
     if (person) misses++;
     onGuess?.({ person, misses });
   }
@@ -203,9 +216,11 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
     state = 'found';
     const w = world.wiggles;
     const head = world.wigglesPoint();
-    if (w.poi) w.poi.occupants = Math.max(0, w.poi.occupants - 1);
-    w.queue?.leave(w);
-    Object.assign(w, { state: 'fixed', mode: 'stand', dir: 'down', action: 'wave', fixedActions: ['wave'], path: null, poi: null, queue: null, sortBias: 0 });
+    if (!classic) {
+      if (w.poi) w.poi.occupants = Math.max(0, w.poi.occupants - 1);
+      w.queue?.leave(w);
+      Object.assign(w, { state: 'fixed', mode: 'stand', dir: 'down', action: 'wave', fixedActions: ['wave'], path: null, poi: null, queue: null, sortBias: 0 });
+    }
     const colours = ['#ffd23f', '#ff6fb5', '#3bceac', '#5b8def', '#e98a3a', '#8b5cc7'];
     for (let i = 0; i < 70; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -217,7 +232,7 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
     tweenCamera(head.x, head.y + (camera.viewH * 0.24) / target, target, 900);
     navigator.vibrate?.(60);
     setTimeout(() => {
-      if (state === 'found') onFound?.({ timeMs: elapsed, misses, hintsUsed });
+      if (state === 'found') onFound?.({ timeMs: elapsed, misses, hintsUsed, mode: world.mode, difficulty: world.difficulty.level });
     }, FOUND_DELAY_MS);
   }
 
@@ -226,26 +241,44 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
     onInteract: () => {
       tween = null;
       crosshair = false;
+      dirty = true;
     },
   });
+
+  function moveKeyboardCursor(dx, dy) {
+    const towardCentre = (position, centre, delta) => (centre - position) * delta > 0
+      ? Math.sign(delta) * Math.min(Math.abs(delta), Math.abs(centre - position)) : 0;
+    const cx = towardCentre(cursorX, camera.viewW / 2, dx);
+    const cy = towardCentre(cursorY, camera.viewH / 2, dy);
+    cursorX += cx; cursorY += cy;
+    dx -= cx; dy -= cy;
+    const x = camera.x, y = camera.y;
+    panBy(camera, -dx, -dy);
+    // Once the camera reaches an edge, move the reticle over the remaining
+    // picture instead of making edge targets unreachable to keyboard players.
+    cursorX = Math.max(0, Math.min(camera.viewW, cursorX + dx - (camera.x - x) * camera.scale));
+    cursorY = Math.max(0, Math.min(camera.viewH, cursorY + dy - (camera.y - y) * camera.scale));
+  }
 
   function onKey(e) {
     if (state !== 'running') return;
     const step = 80;
     const k = e.key;
+    if (!crosshair) { cursorX = camera.viewW / 2; cursorY = camera.viewH / 2; }
     let handled = true;
-    if (k === 'ArrowLeft' || k === 'a') panBy(camera, step, 0);
-    else if (k === 'ArrowRight' || k === 'd') panBy(camera, -step, 0);
-    else if (k === 'ArrowUp' || k === 'w') panBy(camera, 0, step);
-    else if (k === 'ArrowDown' || k === 's') panBy(camera, 0, -step);
-    else if (k === '+' || k === '=') zoomAt(camera, camera.viewW / 2, camera.viewH / 2, 1.3);
-    else if (k === '-' || k === '_') zoomAt(camera, camera.viewW / 2, camera.viewH / 2, 1 / 1.3);
-    else if (k === 'Enter' || k === ' ') guessAt(camera.viewW / 2, camera.viewH / 2);
+    if (k === 'ArrowLeft' || k === 'a') moveKeyboardCursor(-step, 0);
+    else if (k === 'ArrowRight' || k === 'd') moveKeyboardCursor(step, 0);
+    else if (k === 'ArrowUp' || k === 'w') moveKeyboardCursor(0, -step);
+    else if (k === 'ArrowDown' || k === 's') moveKeyboardCursor(0, step);
+    else if (k === '+' || k === '=') zoomAt(camera, cursorX, cursorY, 1.3);
+    else if (k === '-' || k === '_') zoomAt(camera, cursorX, cursorY, 1 / 1.3);
+    else if (k === 'Enter' || k === ' ') guessAt(cursorX, cursorY);
     else handled = false;
     if (handled) {
       crosshair = true;
       tween = null;
       e.preventDefault();
+      dirty = true;
     }
   }
   canvas.addEventListener('keydown', onKey);
@@ -260,6 +293,8 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
   return {
     world,
     camera,
+    mode: world.mode,
+    get renderStats() { return { ...renderer.stats, needsRefine: renderer.needsRefine, cachePixels: renderer.cachePixels }; },
     get state() {
       return state;
     },
@@ -273,7 +308,10 @@ export function createGame({ canvas, scene, level, seed, perfFactor = 1, reduced
       return { timeMs: elapsed, misses, hintsUsed };
     },
     start() {
-      if (state === 'ready') state = 'running';
+      if (state === 'ready') {
+        state = 'running';
+        last = performance.now();
+      }
       canvas.focus({ preventScroll: true });
     },
     pause() {

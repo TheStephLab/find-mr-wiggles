@@ -14,13 +14,15 @@ import { drawEscalator, drawTravelator } from './props.js';
  *  - underlay: animated things on the ground that people stand on (escalators…)
  *  - props, dynamic parts and people: depth-sorted by their nearest ground y
  */
-export function createKit({ rng, width, height, difficulty, view = {} }) {
+export function createKit({ rng, width, height, difficulty, view = {}, mode = 'animated' }) {
   const nav = new NavGraph();
   const P = createProjection({ width, height, ...view });
   const pending = [];
 
   const kit = {
     rng,
+    mode,
+    clock: mode === 'classic' ? new Date('2026-10-24T10:08:00Z') : undefined,
     W: width,
     H: height,
     d: difficulty,

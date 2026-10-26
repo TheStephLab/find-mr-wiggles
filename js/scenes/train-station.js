@@ -1,7 +1,8 @@
 import { addKiosk, addBench, addPlant, addPillar, addBin, addMachine, scatter, addSignPosts } from './builders.js';
-import { tiles, gridLines, box, text, clockFace, lampPost3d, createPigeons, frontWall, infoDesk3d, OUT, shade, rrect } from './props.js';
+import { tiles, gridLines, box, text, clockFace, lampPost3d, createPigeons, frontWall, infoDesk3d, OUT } from './props.js';
 import { drawBox, onFront, sideQuad, poly } from './draw3d.js';
 import { projectBox } from '../core/projection.js';
+import { drawMainlineCar, drawMetroCar } from './transport.js';
 
 const DESTINATIONS = ['Puddleford', 'Gigglewick', 'Mumbleton-on-Sea', 'Wobblecombe', 'Snoringham', 'Fizzbury Parkway', 'Little Dithering', 'Bramblemoor', 'Kettlewhistle', 'Upper Noodleby', 'Dozy Hollow', 'Crumbleton', 'Wigglesworth Bay'];
 const LIVERIES = [
@@ -58,7 +59,7 @@ export const trainStation = {
       }
     }
 
-    kit.backdrop = (ctx) => stationBackdrop(ctx, P, W, H, divTop, tracks);
+    kit.backdrop = (ctx) => stationBackdrop(ctx, P, W, H, divTop, tracks, kit.clock);
 
     kit.addFloor({ x: 0, y: 0, w: W, h: bufferY }, (ctx, view) => {
       ctx.fillStyle = '#8a7d6b';
@@ -94,8 +95,9 @@ export const trainStation = {
           drawBox(ctx, P, { x: bx, y: by, w: t.w - 16, d: 14, h: 14, z: E - 4 }, { front: '#c0392b' });
           onFront(ctx, P, bx, bufferY, E - 4, (c) => {
             c.fillStyle = '#fff';
-            for (let k = 0; k < 3; k++) c.fillRect(6 + k * 12, -12, 6, 8);
-            text(c, String(i + 1), (t.w - 16) / 2, -26, { size: 14, colour: 'rgba(255,255,255,0.85)' });
+            for (const k of [0, 2]) c.fillRect(6 + k * 12, -12, 6, 8);
+            box(c, (t.w - 16) / 2 - 7, -13, 14, 12, '#20385e', null, 0, 2);
+            text(c, String(i + 1), (t.w - 16) / 2, -7, { size: 10, colour: '#fff4dc' });
           });
         },
       });
@@ -186,7 +188,7 @@ export const trainStation = {
     kit.addProp({
       y: clockY,
       box: { x: clockX - 20, y: clockY - 6, w: 40, d: 8, h: 132, z: E },
-      draw: (ctx) => onFront(ctx, P, clockX, clockY, E, (c) => clockPost(c)),
+      draw: (ctx) => onFront(ctx, P, clockX, clockY, E, (c) => clockPost(c, kit.clock)),
       solid: { x: clockX - 4, y: clockY, w: 8, d: 0, h: 100, z: E },
     });
     kit.block({ x: clockX - 8, y: clockY - 6, w: 16, h: 8 });
@@ -302,7 +304,7 @@ export const trainStation = {
 };
 
 // ------------------------------------------------------------------ drawings
-function stationBackdrop(ctx, P, W, H, divTop, tracks) {
+function stationBackdrop(ctx, P, W, H, divTop, tracks, clock) {
   const top = E + WALL;
   // back wall with the station name, a clock and tunnel mouths
   poly(ctx, [P.pt(0, 0, E - 20), P.pt(W, 0, E - 20), P.pt(W, 0, top), P.pt(0, 0, top)], '#a8644a', OUT, 1);
@@ -347,7 +349,7 @@ function stationBackdrop(ctx, P, W, H, divTop, tracks) {
     text(c, 'WHISTLEBURY JUNCTION', W / 2, -127, { size: 30, colour: '#f2c94c' });
     c.save();
     c.translate(W / 2, -68);
-    clockFace(c, 0, 0, 26);
+    clockFace(c, 0, 0, 26, clock);
     c.restore();
   });
   // side walls with tall windows
@@ -393,7 +395,7 @@ function departuresBoard(c, w, t) {
   }
 }
 
-function clockPost(c) {
+function clockPost(c, clock) {
   c.fillStyle = 'rgba(0,0,0,0.15)';
   c.beginPath();
   c.ellipse(0, 0, 14, 4, 0, 0, Math.PI * 2);
@@ -402,7 +404,7 @@ function clockPost(c) {
   c.fillStyle = '#2f5a46';
   c.fillRect(-3, -100, 6, 92);
   box(c, -18, -128, 36, 30, '#2f5a46', OUT, 1, 6);
-  clockFace(c, 0, -113, 12);
+  clockFace(c, 0, -113, 12, clock);
 }
 
 function piano3d(ctx, P, x, y, z) {
@@ -440,30 +442,11 @@ function createTrain(rng, P, track, bufferY, livery) {
   const x = track.x + 7;
   const w = track.w - 14;
   const z = E - 14;
-  const h = 40;
+  const h = 48;
   const carLen = 104;
-  const visibleSide = x + w < P.cx ? x + w : x > P.cx ? x : null;
 
   function drawCar(ctx, y0, y1, lead) {
-    drawBox(ctx, P, { x, y: y0, w, d: y1 - y0, h, z }, { front: lead ? livery.front : shade(livery.roof, -0.1), side: livery.roof, top: shade(livery.roof, 0.18) });
-    if (visibleSide !== null) {
-      sideQuad(ctx, P, visibleSide, y0 + 3, y1 - 3, z + 10, z + 13, livery.stripe);
-      for (let wy = y0 + 10; wy < y1 - 14; wy += 18) sideQuad(ctx, P, visibleSide, wy, wy + 11, z + 19, z + 30, '#2a3440');
-      if (st.doors > 0) {
-        for (const f of [0.3, 0.72]) {
-          const dy = y0 + (y1 - y0) * f;
-          sideQuad(ctx, P, visibleSide, dy - 5 * st.doors, dy + 5 * st.doors, z + 3, z + 34, '#111');
-        }
-      }
-    }
-    if (lead) {
-      onFront(ctx, P, x, y1, z, (c) => {
-        box(c, 6, -h + 6, w - 12, 12, '#2a3440', OUT, 0.8, 2);
-        c.fillStyle = '#fff6c4';
-        c.fillRect(4, -10, 6, 4);
-        c.fillRect(w - 10, -10, 6, 4);
-      });
-    }
+    drawMainlineCar(ctx, P, { x, y0, y1, w, h, z, lead, doors: st.doors, livery });
   }
 
   return {
@@ -523,13 +506,15 @@ function createTrain(rng, P, track, bufferY, livery) {
 }
 
 function createMetro(rng, P, W, edge, H) {
-  const len = Math.min(W * 0.62, 820);
+  const carLen = 130;
+  const cars = Math.max(1, Math.floor((Math.min(W * .62, 820) + 6) / (carLen + 6)));
+  const len = cars * (carLen + 6) - 6;
   const stopX = W / 2 + len / 2;
   const st = { state: 'away', front: -20, v: 0, timer: rng.range(2, 8), doors: 0 };
   const y0 = edge + 10;
   const y1 = H - 10;
   const z = -24;
-  const h = 40;
+  const h = 46;
   return {
     update(dt) {
       switch (st.state) {
@@ -579,26 +564,16 @@ function createMetro(rng, P, W, edge, H) {
         sortY: y1,
         bounds: projectBox(P, { x: x0, y: y0, w: x1 - x0, d: y1 - y0, h, z }, 4),
         draw: (ctx) => {
-          const carLen = 130;
-          for (let cx = st.front - len; cx < st.front; cx += carLen + 6) {
+          ctx.save();
+          poly(ctx, [P.pt(0, y0, z + h + 4), P.pt(W, y0, z + h + 4), P.pt(W, y1, z + h + 4), P.pt(W, y1, z - 8), P.pt(0, y1, z - 8), P.pt(0, y1, z + h + 4)], null, null);
+          ctx.clip();
+          for (let cx = st.front - len, number = 1; cx < st.front; cx += carLen + 6, number++) {
             const a = Math.max(0, cx);
             const b = Math.min(W, cx + carLen, st.front);
             if (b <= a) continue;
-            drawBox(ctx, P, { x: a, y: y0, w: b - a, d: y1 - y0, h, z }, { front: '#e8e8e8', top: '#f6f6f6', side: '#c9c9c9' });
-            onFront(ctx, P, a, y1, z, (c) => {
-              c.fillStyle = '#c0392b';
-              c.fillRect(2, -10, b - a - 4, 5);
-              c.fillStyle = '#2a3440';
-              for (let wx = 10; wx < b - a - 20; wx += 26) {
-                rrect(c, wx, -h + 8, 18, 14, 3);
-                c.fill();
-              }
-              if (st.doors > 0) {
-                c.fillStyle = '#111';
-                c.fillRect((b - a) / 2 - 8 * st.doors, -h + 6, 16 * st.doors, h - 12);
-              }
-            });
+            drawMetroCar(ctx, P, { x: cx, y0, y1, z, doors: st.doors, lead: cx + carLen + 6 >= st.front, number });
           }
+          ctx.restore();
         },
       }];
     },
