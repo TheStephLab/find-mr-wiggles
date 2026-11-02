@@ -32,12 +32,14 @@ export function addKiosk(kit, { x, y, w = 92, d = 34, name, colour, colour2 = co
   const k = { x, y, w, d, name, colour, colour2, goods };
   const z = kit.floorZ(x + w / 2, y + d / 2);
   kit.addProp({
+    cache: true,
     y,
     box: { x: x - 6, y: y - 10, w: w + 12, d: d * 0.55 + 10, h: 82, z },
     draw: (ctx, t, P) => kioskBack3d(ctx, P, k, z),
     solid: { x, y: y - 6, w, d: 6, h: 50, z },
   });
   kit.addProp({
+    cache: true,
     y: y + d,
     box: { x, y: y + d - 12, w, d: 12, h: 30, z },
     draw: (ctx, t, P) => kioskFront3d(ctx, P, k, z),
@@ -58,10 +60,12 @@ export function addKiosk(kit, { x, y, w = 92, d = 34, name, colour, colour2 = co
 }
 
 /** Bench with its seat along x..x+w at depth y-8..y. */
-export function addBench(kit, { x, y, w = 46, facing = 'down', seats = 2, wood = '#a8723f', weight = 1 }) {
+export function addBench(kit, { x, y, w = 46, facing = 'down', seats = 2, wood = '#a8723f', weight = 1, kind = 'seat' }) {
   const z = kit.floorZ(x + w / 2, y);
   const sortY = facing === 'up' ? y + 2 : y;
   kit.addProp({
+    cache: true,
+    kind: 'bench',
     y: sortY,
     box: { x, y: y - 10, w, d: 12, h: 32, z },
     draw: (ctx, t, P) => bench3d(ctx, P, x, y, w, facing, wood, z),
@@ -71,6 +75,7 @@ export function addBench(kit, { x, y, w = 46, facing = 'down', seats = 2, wood =
   for (let i = 0; i < seats; i++) {
     const sx = x + ((i + 0.5) * w) / seats;
     kit.poi({
+      kind,
       x: sx,
       y: facing === 'down' ? y + 3 : y - 9,
       mode: 'sit',
@@ -86,6 +91,8 @@ export function addPlant(kit, x, y, size = 1, leaf = '#3f8f4a') {
   const z = kit.floorZ(x, y);
   const r = 12 * size;
   kit.addProp({
+    cache: true,
+    kind: 'planter',
     y: y + r * 0.6,
     box: { x: x - r * 1.1, y: y - r, w: r * 2.2, d: r * 1.6, h: 52 * size, z },
     draw: (ctx, t, P) => plant3d(ctx, P, x, y, size, leaf, z),
@@ -97,6 +104,7 @@ export function addPlant(kit, x, y, size = 1, leaf = '#3f8f4a') {
 export function addPillar(kit, x, y, h = 130, w = 20, colour = '#cfc6b4') {
   const z = kit.floorZ(x, y);
   kit.addProp({
+    cache: true,
     y: y + w / 2 + 3,
     box: { x: x - w / 2 - 4, y: y - w / 2 - 4, w: w + 8, d: w + 8, h, z },
     draw: (ctx, t, P) => pillar3d(ctx, P, x, y, h, w, colour, z),
@@ -107,13 +115,14 @@ export function addPillar(kit, x, y, h = 130, w = 20, colour = '#cfc6b4') {
 
 export function addBin(kit, x, y, colour = '#2f6b45') {
   const z = kit.floorZ(x, y);
-  kit.addProp({ y: y + 4, box: { x: x - 8, y: y - 8, w: 16, d: 14, h: 20, z }, draw: (ctx, t, P) => bin3d(ctx, P, x, y, colour, z) });
+  kit.addProp({ cache: true, y: y + 4, box: { x: x - 8, y: y - 8, w: 16, d: 14, h: 20, z }, draw: (ctx, t, P) => bin3d(ctx, P, x, y, colour, z) });
   kit.block({ x: x - 7, y: y - 7, w: 14, h: 12 });
 }
 
 export function addMachine(kit, x, y, { w = 26, h = 44, colour = '#2d5f8b', screen = '#7fd0f0', label = '', use = true } = {}) {
   const z = kit.floorZ(x + w / 2, y);
   kit.addProp({
+    cache: true,
     y,
     box: { x: x - 2, y: y - 13, w: w + 4, d: 14, h: h + 14, z },
     draw: (ctx, t, P) => machine3d(ctx, P, x, y, w, h, colour, screen, label, z),
@@ -149,6 +158,7 @@ export function addStanchionLines(kit, lines, belt = '#c0392b') {
 export function addSignPosts(kit, x, y, w, label, { colour = '#20385e', textColour = '#fff', height = 78 } = {}) {
   const z = kit.floorZ(x + w / 2, y);
   kit.addProp({
+    cache: true,
     y,
     box: { x: x - 4, y: y - 2, w: w + 8, d: 4, h: height + 22, z },
     draw: (ctx, t, P) =>

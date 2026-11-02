@@ -8,7 +8,6 @@ import { createWorld } from './game/world.js';
 import { createRenderer } from './game/renderer.js';
 import { drawPortrait, drawPerson } from './game/draw-person.js';
 import { WIGGLES_LOOK, traitsOf } from './game/people.js';
-import { modeLabel, runSettingsKey } from './core/mode.js';
 
 const $ = (sel) => document.querySelector(sel);
 const store = createProgressStore();
@@ -20,8 +19,6 @@ let game = null;
 let currentSceneId = null;
 let timerInterval = 0;
 let toastTimer = 0;
-let pendingModeScene = null;
-let preparationFrame = 0;
 
 // ---------------------------------------------------------------- helpers
 function showScreen(name) {
@@ -106,7 +103,6 @@ requestAnimationFrame(drawPortraits);
 function refreshHome() {
   const settings = store.getSettings();
   $('#home-difficulty').textContent = `Difficulty: ${getDifficulty(settings.difficulty).label}`;
-  $('#home-mode').textContent = `${modeLabel(settings.mode)} Mode`;
   const done = SCENE_IDS.filter((id) => store.isCompleted(id)).length;
   $('#home-progress').textContent = `${done} of ${SCENES.length} scenes found`;
   $('#btn-play').textContent = done === 0 ? 'Play' : done === SCENES.length ? 'Play again' : 'Continue';
@@ -116,14 +112,12 @@ function refreshHome() {
 const thumbCache = new Map();
 
 function renderThumb(scene, canvas) {
-  const mode = store.getSettings().mode;
-  const key = `${mode}|${scene.id}`;
-  if (thumbCache.has(key)) {
-    canvas.getContext('2d').drawImage(thumbCache.get(key), 0, 0, canvas.width, canvas.height);
+  if (thumbCache.has(scene.id)) {
+    canvas.getContext('2d').drawImage(thumbCache.get(scene.id), 0, 0, canvas.width, canvas.height);
     return;
   }
-  const world = createWorld(scene, { level: 2, seed: 20261022, mode });
-  if (mode === 'animated') for (let i = 0; i < 40; i++) world.update(0.1);
+  const world = createWorld(scene, { level: 2, seed: 20261022 });
+  for (let i = 0; i < 40; i++) world.update(0.1);
   const camera = createCamera({ viewW: canvas.width, viewH: canvas.height, worldW: world.pictureWidth, worldH: world.pictureHeight });
   camera.minScale = 0;
   centreOn(camera, world.pictureWidth / 2, world.pictureHeight * 0.55, (canvas.width / world.pictureWidth) * 1.7);
@@ -132,15 +126,13 @@ function renderThumb(scene, canvas) {
   copy.width = canvas.width;
   copy.height = canvas.height;
   copy.getContext('2d').drawImage(canvas, 0, 0);
-  thumbCache.set(key, copy);
+  thumbCache.set(scene.id, copy);
 }
 
 function renderSceneList() {
   const list = $('#scene-list');
   list.replaceChildren();
   const level = store.getSettings().difficulty;
-  const mode = store.getSettings().mode;
-  $('#scenes-mode').textContent = `${modeLabel(mode)} Mode · Five ${mode === 'classic' ? 'still illustrations' : 'living locations'}. Unlocks and best times belong to this mode.`;
   SCENES.forEach((scene, i) => {
     const unlocked = store.isUnlocked(SCENE_IDS, scene.id);
     const rec = store.getScene(scene.id);
@@ -173,7 +165,7 @@ function renderSceneList() {
     } else {
       status = '<span class="badge badge-new">New</span> Mr. Wiggles is in here somewhere…';
     }
-    card.setAttribute('aria-label', `${scene.title}, ${modeLabel(mode)} Mode${unlocked ? '' : ', locked'}`);
+    card.setAttribute('aria-label', `${scene.title}${unlocked ? '' : ', locked'}`);
     card.innerHTML = '';
     card.append(thumb);
     card.insertAdjacentHTML(
@@ -205,13 +197,8 @@ function openScene(id) {
   $('#start-kind').textContent = scene.kind;
   $('#start-title').textContent = `Find Mr. Wiggles at ${scene.title}`;
   $('#start-blurb').textContent = scene.blurb;
-  const mode = store.getSettings().mode;
-  $('#hud-diff').textContent = `${modeLabel(mode)} · ${getDifficulty(store.getSettings().difficulty).label}`;
-  $('#start-mode').textContent = mode === 'classic'
-    ? 'Classic Mode · A composed still illustration. Find Mr. Wiggles among the little stories; nobody moves.'
-    : 'Animated Mode · Explore a living scene. Mr. Wiggles moves, but always comes back into view.';
-  $('#btn-restart').textContent = mode === 'classic' ? 'New illustration (new hiding place)' : 'New game (Mr. Wiggles moves)';
-  $('#game-canvas').setAttribute('aria-label', `${scene.title}, ${modeLabel(mode)} Mode. ${mode === 'classic' ? 'A still crowded illustration.' : 'A moving crowd.'} Drag or use arrows to pan, pinch, scroll or plus and minus to zoom. Tap Mr. Wiggles or press Enter at the crosshair.`);
+  $('#hud-diff').textContent = getDifficulty(store.getSettings().difficulty).label;
+  $('#game-canvas').setAttribute('aria-label', `${scene.title}. A moving crowd. Drag or use arrows to pan, pinch, scroll or plus and minus to zoom. Tap Mr. Wiggles or press Enter at the crosshair.`);
   updateDifficultyLabels();
   openDialog($('#dlg-start'));
   prepareGame();
@@ -232,34 +219,25 @@ function prepareGame() {
     seed: randomSeed(),
     perfFactor,
     reducedMotion: settings.reducedMotion || systemReducedMotion,
-    mode: settings.mode,
     onFound: handleFound,
     onGuess: handleGuess,
     onAutoPause: pauseGame,
   });
-  game.preparedWith = runSettingsKey(settings);
-  $('#btn-start').disabled = settings.mode === 'classic';
-  $('#start-readiness').textContent = settings.mode === 'classic' ? 'Preparing the full illustration before the clock starts...' : '';
-  if (settings.mode === 'classic') {
-    const check = () => {
-      if (!game || game.state !== 'ready') return;
-      if (game.renderStats.frames > 0 && !game.renderStats.needsRefine) {
-        $('#btn-start').disabled = false;
-        $('#start-readiness').textContent = 'Illustration ready. Take your time; everyone stays in place.';
-      } else preparationFrame = requestAnimationFrame(check);
-    };
-    preparationFrame = requestAnimationFrame(check);
-  }
+  game.preparedWith = settings;
+}
+
+function preparationMatches(settings) {
+  return game?.preparedWith.difficulty === settings.difficulty
+    && game.preparedWith.reducedMotion === settings.reducedMotion;
 }
 
 function startGame() {
-  if (game?.mode === 'classic' && game.state === 'ready' && game.renderStats.needsRefine) return;
   const scene = getScene(currentSceneId);
   const settings = store.getSettings();
   closeDialog($('#dlg-start'));
-  if (!game || game.state !== 'ready' || game.preparedWith !== runSettingsKey(settings)) prepareGame();
+  if (!game || game.state !== 'ready' || !preparationMatches(settings)) prepareGame();
   game.start();
-  $('#hud-diff').textContent = `${modeLabel(settings.mode)} · ${getDifficulty(settings.difficulty).label}`;
+  $('#hud-diff').textContent = getDifficulty(settings.difficulty).label;
   clearInterval(timerInterval);
   timerInterval = setInterval(() => {
     if (!game) return;
@@ -267,11 +245,10 @@ function startGame() {
     const cooling = game.hintCooldownLeft() > 0;
     $('#btn-hint').setAttribute('aria-disabled', String(cooling));
   }, 250);
-  announce(`${scene.title}, ${modeLabel(settings.mode)} Mode. The search has begun!`);
+  announce(`${scene.title}. The search has begun!`);
 }
 
 function stopGame() {
-  cancelAnimationFrame(preparationFrame);
   clearInterval(timerInterval);
   game?.destroy();
   game = null;
@@ -306,9 +283,9 @@ function handleGuess({ person }) {
   toast(line);
 }
 
-function handleFound({ timeMs, misses, hintsUsed, mode, difficulty }) {
-  if (!game || game.mode !== mode) return;
-  const result = store.recordCompletion(currentSceneId, { timeMs, difficulty, mode, hintsUsed, misses });
+function handleFound({ timeMs, misses, hintsUsed, difficulty }) {
+  if (!game || game.state !== 'found') return;
+  const result = store.recordCompletion(currentSceneId, { timeMs, difficulty, hintsUsed, misses });
   clearInterval(timerInterval);
   $('#hud-timer').textContent = formatTime(timeMs);
   $('#found-time').textContent = formatTime(timeMs);
@@ -319,9 +296,9 @@ function handleFound({ timeMs, misses, hintsUsed, mode, difficulty }) {
   stars.setAttribute('aria-label', `${result.stars} of 3 stars`);
   $('#found-best').textContent = result.isBest
     ? result.previousBest
-      ? `New ${modeLabel(mode)} best on ${getDifficulty(difficulty).label}! (was ${formatTime(result.previousBest)})`
-      : `First ${modeLabel(mode)} find on ${getDifficulty(difficulty).label}!`
-    : `${modeLabel(mode)} best on ${getDifficulty(difficulty).label}: ${formatTime(result.previousBest)}`;
+      ? `New best on ${getDifficulty(difficulty).label}! (was ${formatTime(result.previousBest)})`
+      : `First find on ${getDifficulty(difficulty).label}!`
+    : `Best on ${getDifficulty(difficulty).label}: ${formatTime(result.previousBest)}`;
   const index = SCENE_IDS.indexOf(currentSceneId);
   const next = SCENES[index + 1];
   const nextBtn = $('#btn-next');
@@ -356,12 +333,10 @@ function renderDifficultyOptions() {
     wrap.append(label);
   }
   $('#opt-motion').checked = store.getSettings().reducedMotion;
-  $('#opt-classic').checked = store.getSettings().mode === 'classic';
 }
 
 function openSettings() {
   renderDifficultyOptions();
-  $('#settings-mode-status').textContent = '';
   openDialog($('#dlg-settings'));
 }
 
@@ -442,28 +417,10 @@ $('#dlg-found').addEventListener('cancel', (e) => {
 });
 
 $('#opt-motion').addEventListener('change', (e) => store.setReducedMotion(e.target.checked));
-$('#opt-classic').addEventListener('change', (e) => {
-  const mode = store.setMode(e.target.checked ? 'classic' : 'animated');
-  if (game || pendingModeScene) {
-    pendingModeScene = store.isUnlocked(SCENE_IDS, currentSceneId) ? currentSceneId : store.nextSceneId(SCENE_IDS);
-    stopGame();
-    for (const id of ['#dlg-start', '#dlg-found', '#dlg-pause', '#dlg-meet']) closeDialog($(id));
-    showScreen('scenes');
-    $('#settings-mode-status').textContent = `Previous search ended. Press Done to start a fresh ${modeLabel(mode)} puzzle. Saved results are unchanged.`;
-  } else if (!screens.scenes.hidden) renderSceneList();
-  updateDifficultyLabels();
-  announce(`${modeLabel(mode)} Mode selected. Each mode keeps its own progress.`);
-});
 $('#btn-settings-close').addEventListener('click', () => closeDialog($('#dlg-settings')));
 $('#dlg-settings').addEventListener('close', () => {
-  if (pendingModeScene) {
-    const id = pendingModeScene;
-    pendingModeScene = null;
-    openScene(id);
-    return;
-  }
   const s = store.getSettings();
-  if (game?.state === 'ready' && $('#dlg-start').open && game.preparedWith !== runSettingsKey(s)) prepareGame();
+  if (game?.state === 'ready' && $('#dlg-start').open && !preparationMatches(s)) prepareGame();
 });
 $('#btn-reset').addEventListener('click', () => openDialog($('#dlg-confirm')));
 $('#btn-confirm-no').addEventListener('click', () => closeDialog($('#dlg-confirm')));

@@ -11,13 +11,17 @@ test('registry has unique ids and required fields', () => {
     for (const key of ['id', 'title', 'kind', 'blurb', 'build']) assert.ok(s[key], `${s.id} missing ${key}`);
     assert.equal(getScene(s.id), s);
   }
-  assert.deepEqual(SCENE_IDS.slice(0, 2), ['whistlebury-junction', 'skyhaven-international']);
+  assert.deepEqual(SCENE_IDS, [
+    'whistlebury-junction', 'skyhaven-international', 'copperleaf-galleria',
+    'little-lantern-market', 'bramblewick-fairground',
+  ]);
 });
 
 for (const scene of SCENES) {
   for (const d of DIFFICULTIES) {
     test(`${scene.title} builds a valid world at ${d.label}`, () => {
       const world = createWorld(scene, { level: d.level, seed: 1234 + d.level });
+      assert.equal(Object.hasOwn(world, 'mode'), false, 'there is only one game');
       const { nav } = world;
       const live = nav.liveNodes();
       assert.ok(live.length > 20);

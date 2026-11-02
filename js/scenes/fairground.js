@@ -109,7 +109,7 @@ export const fairground = {
       addBench(kit, { x: W * f - 24, y: H * .91, wood: '#739183' });
       addBin(kit, W * f + 38, H * .92);
     }
-    for (const f of [.04, .96]) for (const y of [H * .14, H * .47, H * .83]) addTree(kit, W * f, y, 30);
+    for (const f of [.04, .96]) for (const y of [H * .14, H * .31, H * .47, H * .65, H * .83]) addTree(kit, W * f, y, 30);
     const sx = W * .48, sy = H * .47;
     kit.addProp({ y: sy, box: { x: sx - 50, y: sy - 25, w: 100, d: 25, h: 15 }, draw: ctx => drawBox(ctx, P, { x: sx - 50, y: sy - 25, w: 100, d: 25, h: 10 }, { front: '#b88663', top: '#dbc18f' }), block: { x: sx - 50, y: sy - 25, w: 100, h: 25 } });
     kit.station({ x: sx, y: sy - 9, uniform: 'musician', dir: 'down', action: 'guitar', fixedActions: ['guitar'] });

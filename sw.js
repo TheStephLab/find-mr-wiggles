@@ -1,5 +1,5 @@
 /* Offline support: precache the app shell, then serve cache-first and refresh in the background. */
-const VERSION = 'wiggles-v5';
+const VERSION = 'wiggles-v7';
 const SHELL = [
   './',
   './index.html',
@@ -18,8 +18,8 @@ const SHELL = [
   './js/core/projection.js',
   './js/core/rng.js',
   './js/core/storage.js',
-  './js/core/mode.js',
   './js/game/agents.js',
+  './js/game/crowd.js',
   './js/game/draw-person.js',
   './js/game/figure/core.js',
   './js/game/figure/head.js',
@@ -31,7 +31,6 @@ const SHELL = [
   './js/game/people.js',
   './js/game/renderer.js',
   './js/game/world.js',
-  './js/game/classic.js',
   './js/scenes/index.js',
   './js/scenes/kit.js',
   './js/scenes/builders.js',
@@ -40,6 +39,7 @@ const SHELL = [
   './js/scenes/transport.js',
   './js/scenes/train-station.js',
   './js/scenes/airport.js',
+  './js/scenes/flight.js',
   './js/scenes/venue-props.js',
   './js/scenes/galleria.js',
   './js/scenes/market.js',

@@ -3,7 +3,8 @@ import { gridLines, box, text, frontWall, infoDesk3d, OUT } from './props.js';
 import { drawBox, onFront, poly, sideQuad } from './draw3d.js';
 import { projectBox } from '../core/projection.js';
 import { CLOTHES } from '../game/people.js';
-import { AIRCRAFT_BOUNDS, drawAircraft } from './transport.js';
+import { createFlight } from './flight.js';
+import { startVisit } from '../game/agents.js';
 
 const AIRLINES = [
   { name: 'Puffin Air', body: '#ffffff', stripe: '#1f6fbf', tail: '#f2a33a' },
@@ -68,20 +69,29 @@ export const airport = {
       ctx.fillStyle = '#c9ced6';
       ctx.fillRect(0, apronBot, W, winBot - apronBot);
     });
+    const runwayControl = { owner: null, waiting: [] };
+    const flights = parked.map((p, i) => kit.addDynamic(createFlight(P, W, apronBot, p, i, runwayControl)));
     for (const p of parked) {
-      kit.addProp({ y: p.y, box: { x: p.x + AIRCRAFT_BOUNDS.x, y: p.y - 4, w: AIRCRAFT_BOUNDS.w, d: 8, h: AIRCRAFT_BOUNDS.h, z: E - 20 }, draw: (ctx) => onFront(ctx, P, p.x, p.y, E, (c) => drawAircraft(c, .95, p.facing, p.airline)) });
       const doorX = p.x + p.facing * 70;
       kit.addProp({
-        y: apronBot,
-        box: { x: doorX - 12, y: p.y, w: 24, d: apronBot - p.y, h: 44, z: E },
+        y: winBot + 14,
+        box: { x: doorX - 12, y: p.y, w: 24, d: winBot + 14 - p.y, h: 66, z: E },
         draw: (ctx) => {
-          drawBox(ctx, P, { x: doorX - 11, y: p.y + 2, w: 22, d: apronBot - p.y - 2, h: 20, z: E + 14 }, { front: '#9aa3ad' });
+          drawBox(ctx, P, { x: doorX - 11, y: p.y + 2, w: 22, d: winBot + 14 - p.y - 2, h: 20, z: E + 14 }, { front: '#9aa3ad' });
           drawBox(ctx, P, { x: doorX - 3, y: apronBot - 18, w: 6, d: 6, h: 14, z: E }, { front: '#5b6470' });
         },
       });
+      kit.addProp({
+        kind: 'boarding-door', y: winBot + 1,
+        box: { x: doorX - 13, y: winBot - 2, w: 26, d: 4, h: 76, z: E },
+        draw: ctx => onFront(ctx, P, doorX, winBot + 1, E, c => {
+          c.fillStyle = '#d1e4eb'; c.fillRect(-12, -60, 3, 60); c.fillRect(9, -60, 3, 60); c.fillRect(-12, -62, 24, 3);
+          box(c, -11, -73, 22, 10, '#315a49', null);
+          text(c, 'BOARD', 0, -68, { size: 4, colour: '#fff' });
+        }),
+      });
       kit.station({ x: p.x - p.facing * 40, y: apronBot - 8, uniform: 'hivis', dir: 'down', action: 'wave', fixedActions: ['wave', null, 'wave'] });
     }
-    kit.addDynamic(createTaxiingPlane(rng, P, W, Math.round(apronBot * 0.32)));
     kit.addDynamic(createBaggageTrain(rng, P, W, apronBot - 10));
 
     // the glass curtain wall between the apron and the gates
@@ -128,12 +138,13 @@ export const airport = {
     });
 
     // ---------------------------------------------------------- gates level
-    const nG = Math.max(2, Math.floor(W / 520));
+    const nG = nP;
     for (let i = 0; i < nG; i++) {
       const gx = Math.round((W * (i + 0.5)) / nG);
       const deskY = winBot + 50;
       const label = `Gate ${String.fromCharCode(65 + (i % 3))}${i + 1}`;
-      const flight = { city: rng.pick(CITIES), airline: rng.pick(AIRLINES) };
+      const aircraft = flights[i];
+      const flight = { city: rng.pick(CITIES), airline: parked[i].airline, aircraft };
       kit.addProp({
         y: deskY,
         box: { x: gx - 44, y: deskY - 16, w: 88, d: 18, h: 80, z: E },
@@ -143,7 +154,30 @@ export const airport = {
       kit.block({ x: gx - 42, y: deskY - 30, w: 84, h: 32 });
       kit.station({ x: gx - 16, y: deskY - 20, uniform: 'crew', dir: 'down', fixedActions: [null, 'reach', 'phone'] });
       kit.station({ x: gx + 16, y: deskY - 20, uniform: 'crew', dir: 'down', fixedActions: [null, 'reach'] });
-      kit.queue({ slots: Array.from({ length: 6 }, (_, k) => ({ x: gx, y: deskY + 14 + k * 13 })), facing: 'up', serviceTime: [2, 5], action: 'reach', weight: 1.2 });
+      const gate = kit.queue({
+        slots: Array.from({ length: 6 }, (_, k) => ({ x: gx, y: deskY + 14 + k * 16 })),
+        facing: 'up', serviceTime: [1.5, 2.5], action: 'reach', weight: 3,
+        requires: a => !a.isWiggles && a.role !== 'staff' && aircraft.canBoard(),
+        onServed: (a, world) => {
+          aircraft.state.pending++;
+          const door = parked[i].x + parked[i].facing * 70;
+          const returnAt = [0, 1, 2].flatMap(k => [-14, 0, 14].map(dx => {
+            const x = W * (.15 + ((k + i) % 3) * .35) + 35 + dx;
+            return { x, y: H - 18, exit: { x, y: H - 44 } };
+          }));
+          startVisit(a, world, {
+            enter: [{ x: gx + 56, y: deskY + 14 }, { x: gx + 56, y: winBot + 14 }, { x: door, y: winBot + 14 }, { x: door, y: parked[i].y + 6 }],
+            exit: [], returnAt, duration: 10,
+            controller: aircraft.controller,
+            onUse: () => { aircraft.state.pending--; aircraft.state.boarded++; },
+          });
+          return true;
+        },
+      });
+      gate.kind = 'boarding'; gate.flight = aircraft;
+      gate.queue.available = () => aircraft.canBoard();
+      gate.queue.maxWait = 55;
+      addStanchionLines(kit, [[[gx - 14, deskY + 16], [gx - 14, deskY + 112]], [[gx + 14, deskY + 16], [gx + 14, deskY + 112]]], '#1f6fbf');
       for (const side of [-1, 1]) {
         for (let r = 0; r < kit.count(2, 1); r++) {
           const bx = gx + side * 70 + (side < 0 ? -96 : 0);
@@ -187,6 +221,10 @@ export const airport = {
     scatter(kit, gatesRect, 1, 120, 70, (x, y) => playArea(kit, P, x, y));
     scatter(kit, gatesRect, kit.count(3, 1), 30, 20, (x, y) => flightScreen(kit, P, x + 15, y + 16));
     scatter(kit, gatesRect, kit.count(5, 2), 24, 18, (x, y) => addPlant(kit, x + 12, y + 10, rng.range(0.8, 1.1), '#2f8f5a'));
+    for (let x = 70; x < W - 50; x += 310) {
+      const y = winBot + 35;
+      if (kit.isFree({ x: x - 18, y: y - 14, w: 36, h: 30 }, 8)) addPlant(kit, x, y, 1.45, '#367e61');
+    }
     scatter(kit, gatesRect, kit.count(4, 2), 24, 24, (x, y) => addPillar(kit, x + 12, y + 12, 130, 18, '#d2d6db'));
     scatter(kit, gatesRect, kit.count(4, 2), 14, 12, (x, y) => addBin(kit, x + 7, y + 8, '#3b4250'));
     scatter(kit, gatesRect, kit.count(3, 1), 50, 20, (x, y) => addBench(kit, { x, y: y + 16, facing: rng.chance(0.5) ? 'down' : 'up', wood: '#2b4f8c' }));
@@ -311,7 +349,7 @@ export const airport = {
     const cyr = Math.round(divBot + (H - divBot) * 0.52);
     const carousel = { x: cxr - cw / 2, y: cyr - 36, w: cw, h: 72 };
     kit.block({ x: carousel.x - 4, y: carousel.y - 4, w: carousel.w + 8, h: carousel.h + 8 });
-    kit.addDynamic(createCarousel(rng, P, carousel));
+    const reclaim = kit.addDynamic(createCarousel(rng, P, carousel));
     addSignPosts(kit, carousel.x + carousel.w / 2 - 50, carousel.y - 26, 100, 'Baggage Reclaim', { colour: '#f2c230', textColour: '#1f2d4a', height: 60 });
     for (let i = 0; i < kit.count(10, 5); i++) {
       const side = i % 4;
@@ -321,15 +359,19 @@ export const airport = {
       else if (side === 2) spot = { x: carousel.x - 14, y: carousel.y + rng.range(12, carousel.h), facing: 'right' };
       else spot = { x: carousel.x + carousel.w + 14, y: carousel.y + rng.range(12, carousel.h), facing: 'left' };
       kit.poi({
+        kind: 'reclaim-wait',
         ...spot,
-        actions: [null, 'phone', 'reach'],
-        duration: [8, 22],
+        actions: ['reach'],
+        duration: [5, 12],
         weight: 1.6,
-        onDone: (agent) => {
-          if (!agent.isWiggles && !agent.look.carry && agent.role !== 'staff') agent.look.carry = { type: 'suitcase', color: rng.pick(CLOTHES) };
-        },
+        requires: a => !a.isWiggles && !a.look.carry && a.role !== 'staff',
+        onDone: agent => reclaim.collect(agent),
       });
     }
+    for (const x of [carousel.x - 34, carousel.x + carousel.w + 34]) {
+      if (kit.isFree({ x: x - 10, y: carousel.y - 30, w: 20, h: 18 }, 4)) addPlant(kit, x, carousel.y - 20, 1.15, '#367e61');
+    }
+    addBench(kit, { x: carousel.x + 30, y: Math.min(H - 58, carousel.y + carousel.h + 65), w: Math.max(60, cw - 60), seats: 4, facing: 'down', wood: '#5e7180' });
     for (let i = 0; i < kit.count(4, 2); i++) {
       kit.poi({ x: downX + rng.range(-60, 60), y: divBot + 80 + rng.range(0, 30), facing: 'up', actions: ['wave', 'wave', null, 'phone'], duration: [8, 20], weight: 1.3 });
     }
@@ -396,40 +438,6 @@ function airportBackdrop(ctx, P, W, H, winBot, divTop) {
   }
 }
 
-function createTaxiingPlane(rng, P, W, y) {
-  const st = { x: -300, dir: 1, airline: rng.pick(AIRLINES), wait: rng.range(0, 6) };
-  return {
-    update(dt) {
-      if (st.wait > 0) {
-        st.wait -= dt;
-        return;
-      }
-      st.x += st.dir * 46 * dt;
-      if ((st.dir > 0 && st.x > W + 260) || (st.dir < 0 && st.x < -260)) {
-        st.dir *= -1;
-        st.airline = rng.pick(AIRLINES);
-        st.wait = rng.range(3, 10);
-      }
-    },
-    parts() {
-      if (st.wait > 0) return [];
-      return [{
-        sortY: y,
-        bounds: projectBox(P, { x: st.x + AIRCRAFT_BOUNDS.x * .8, y, w: AIRCRAFT_BOUNDS.w * .8, d: 1, h: AIRCRAFT_BOUNDS.h * .8, z: E - 20 * .8 }, 6),
-        draw: (ctx, t) => onFront(ctx, P, st.x, y, E, (c) => {
-          drawAircraft(c, .8, st.dir, st.airline);
-          if (Math.floor(t * 2) % 2) {
-            c.fillStyle = '#ff3b3b';
-            c.beginPath();
-            c.arc(0, -36, 2.5, 0, Math.PI * 2);
-            c.fill();
-          }
-        }),
-      }];
-    },
-  };
-}
-
 function createBaggageTrain(rng, P, W, y) {
   const st = { x: rng.range(160, W - 60), dir: 1 };
   const carts = ['#d64545', '#2f6fbf', '#f2a33a', '#3a9a5b'];
@@ -458,12 +466,13 @@ function createBaggageTrain(rng, P, W, y) {
   };
 }
 
-function createCarousel(rng, P, rect) {
+export function createCarousel(rng, P, rect) {
   const { x, y, w, h } = rect;
   const r = h / 2;
   const straight = w - h;
   const perimeter = straight * 2 + Math.PI * r * 2;
-  const bags = Array.from({ length: Math.round(perimeter / 26) }, (_, i) => ({ s: i * 26 + rng.range(0, 10), c: rng.pick(CLOTHES), show: rng.chance(0.7) }));
+  const bags = Array.from({ length: Math.round(perimeter / 26) }, (_, i) => ({ s: i * 26 + rng.range(0, 10), c: rng.pick(CLOTHES), show: rng.chance(0.7), cooldown: 0 }));
+  let distance = 0, collected = 0;
   const at = (s, inset) => {
     s = ((s % perimeter) + perimeter) % perimeter;
     const rr = r - inset;
@@ -484,8 +493,30 @@ function createCarousel(rng, P, rect) {
     return P.pt(px, py, z);
   });
   return {
+    kind: 'reclaim', rect, bags,
+    get collected() { return collected; },
+    position(b) { const [x, y] = at(b.s, 9); return { x, y, z: 10 }; },
+    collect(agent) {
+      if (agent.isWiggles || agent.look.carry || agent.role === 'staff') return false;
+      const bag = bags.filter(b => b.show).sort((a, b) => {
+        const [ax, ay] = at(a.s, 9), [bx, by] = at(b.s, 9);
+        return Math.hypot(ax - agent.x, ay - agent.y) - Math.hypot(bx - agent.x, by - agent.y);
+      })[0];
+      if (!bag) return false;
+      const [x, y] = at(bag.s, 9);
+      if (Math.hypot(x - agent.x, y - agent.y) > 40) return false;
+      agent.look.carry = { type: 'suitcase', color: bag.c };
+      agent.action = 'reach';
+      bag.show = false; bag.cooldown = 12; collected++;
+      return true;
+    },
     update(dt) {
-      for (const b of bags) b.s += dt * 18;
+      distance += dt * 18;
+      for (const b of bags) {
+        b.s = (b.s + dt * 18) % perimeter;
+        b.cooldown = Math.max(0, b.cooldown - dt);
+        if (!b.show && b.cooldown === 0 && b.s < 18) b.show = true;
+      }
     },
     parts() {
       return [{
@@ -500,11 +531,20 @@ function createCarousel(rng, P, rect) {
             if (base[j][1] + base[i][1] > (P.Y(y + r, 0)) * 2) poly(ctx, [base[i], base[j], top[j], top[i]], '#3a414c', null);
           }
           poly(ctx, top, '#4a5260', OUT, 1);
+          for (let s = 0; s < perimeter; s += 7) {
+            const a = at(s + distance, 1), b = at(s + distance, 17);
+            poly(ctx, [P.pt(a[0], a[1], 10.1), P.pt(b[0], b[1], 10.1)], null, '#87919b', .6);
+          }
           poly(ctx, outline(18, 14), '#9aa3ad', OUT, 0.8);
+          drawBox(ctx, P, { x: x + r + 12, y: y + r - 11, w: Math.max(26, straight - 24), d: 22, h: 12, z: 14 }, { front: '#bac3cb', top: '#dde2e5' });
+          onFront(ctx, P, x + w / 2, y + r, 26, c => text(c, 'RECLAIM 02', 0, -3, { size: 6, colour: '#1f2d4a' }));
           for (const b of bags) {
             if (!b.show) continue;
             const [px, py] = at(b.s, 9);
-            drawBox(ctx, P, { x: px - 5, y: py - 4, w: 10, d: 7, h: 8, z: 10 }, { front: b.c, lw: 0.5 });
+            const [nx, ny] = at(b.s + 1, 9), vertical = Math.abs(ny - py) > Math.abs(nx - px);
+            const bw = vertical ? 7 : 12, bd = vertical ? 11 : 7;
+            drawBox(ctx, P, { x: px - bw / 2, y: py - bd / 2, w: bw, d: bd, h: 8, z: 10 }, { front: b.c, lw: 0.5 });
+            poly(ctx, [P.pt(px - 1.5, py, 18), P.pt(px - 1.5, py, 20), P.pt(px + 1.5, py, 20), P.pt(px + 1.5, py, 18)], null, '#303c45', .6);
           }
         },
       }];
@@ -519,7 +559,8 @@ function gateDesk3d(ctx, P, x, y, label, flight, t) {
     box(c, -40, -78, 80, 24, '#1f2d4a', OUT, 1, 3);
     text(c, label, -20, -70, { size: 8, colour: '#ffcf3f' });
     text(c, flight.city, 14, -70, { size: 6, colour: '#fff', maxWidth: 44 });
-    text(c, Math.floor(t) % 4 < 2 ? 'BOARDING' : flight.airline.name, 0, -60, { size: 6, colour: '#9ff09a', maxWidth: 70 });
+    const phase = flight.aircraft.state.phase;
+    text(c, flight.aircraft.canBoard() ? 'BOARDING' : phase === 'boarding' ? 'GATE CLOSING' : ['landing', 'taxi-in'].includes(phase) ? 'ARRIVING' : 'DEPARTED', 0, -60, { size: 6, colour: '#9ff09a', maxWidth: 70 });
   });
   drawBox(ctx, P, { x: x - 40, y: y - 14, w: 80, d: 14, h: 18, z: E }, { front: '#e9e2d0', top: '#1f2d4a' });
 }

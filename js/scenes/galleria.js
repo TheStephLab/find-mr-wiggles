@@ -1,7 +1,7 @@
 import { addKiosk, addBench, addPlant, addPillar, addMachine, scatter } from './builders.js';
 import { tiles, box, text, OUT, frontWall } from './props.js';
 import { onFront, poly } from './draw3d.js';
-import { addFacade, addFountain, addTable } from './venue-props.js';
+import { addFacade, addFountain, addTable, addTree } from './venue-props.js';
 
 export const galleria = {
   id: 'copperleaf-galleria', title: 'Copperleaf Galleria', kind: 'Galleria',
@@ -84,6 +84,9 @@ export const galleria = {
       for (const y of [edge * .5, bottom + 100, H * .8]) addPillar(kit, x, y, 135, 18, '#c1b394');
     }
     addMachine(kit, W / 2 - 14, H * .9, { label: 'MAP', colour: '#3a7774' });
+    for (const x of [W * .08, W * .92]) for (const y of [edge * .55, H * .67]) {
+      if (kit.isFree({ x: x - 18, y: y - 16, w: 36, h: 32 }, 8)) addTree(kit, x, y, 24);
+    }
     kit.grid({ x: 34, y: 95, w: W - 68, h: edge - 120 }, 48);
     kit.grid({ x: 34, y: bottom + 32, w: W - 68, h: H - bottom - 65 }, 52);
   },

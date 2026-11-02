@@ -56,12 +56,17 @@ export function circle(c, x, y, r, fill, stroke = null) {
 export function addTree(kit, x, y, r = 30) {
   const z = kit.floorZ(x, y), { P } = kit;
   kit.addProp({
-    y, box: { x: x - r, y: y - 10, w: r * 2, d: 20, h: r * 2.6, z },
+    kind: 'tree',
+    y, box: { x: x - r * 1.2, y: y - 10, w: r * 2.4, d: 20, h: r * 2.9, z },
     solid: { x: x - r * .7, y, w: r * 1.4, h: r * 1.5, z: z + r },
     block: { x: x - 9, y: y - 9, w: 18, h: 18 },
     draw: (ctx) => onFront(ctx, P, x, y, z, (c) => {
       box(c, -r * .6, -7, r * 1.2, 10, '#b19e76', OUT, .8, 3);
       box(c, -4, -r * 2, 8, r * 2, '#78573d', OUT, .8);
+      c.strokeStyle = '#9b7752'; c.lineWidth = 1.4;
+      c.beginPath(); c.moveTo(-1, -8); c.lineTo(-1, -r * 1.8); c.stroke();
+      c.strokeStyle = '#78573d'; c.lineWidth = 3;
+      for (const s of [-1, 1]) { c.beginPath(); c.moveTo(0, -r * 1.2); c.lineTo(s * r * .45, -r * 1.9); c.stroke(); }
       for (const [dx, dy, size] of [[-1, -1.7, .62], [-.6, -2.1, .65], [.3, -2.1, .68], [.8, -1.65, .6], [0, -1.4, .65]]) {
         circle(c, dx * r * .65, dy * r, r * size, '#527b55', '#365947');
         circle(c, (dx * .65 - .15) * r, (dy - .15) * r, r * size * .6, '#74965b');

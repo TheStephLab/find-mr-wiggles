@@ -105,19 +105,6 @@ button {
   white-space: nowrap;
 }
 
-.mode-note {
-  border: var(--stitch);
-  border-radius: 8px;
-  padding: 0.45rem 0.75rem;
-  background: var(--paper-deep);
-  font-size: 0.95rem;
-}
-
-.settings-note {
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
 [hidden] {
   display: none !important;
 }
@@ -422,15 +409,6 @@ button {
 }
 .badge-locked {
   background: #fff;
-}
-
-.coming-soon {
-  max-width: 60ch;
-  margin: 1rem auto 2rem;
-  padding: 0 1rem calc(1rem + var(--safe-bottom));
-  text-align: center;
-  font-style: italic;
-  color: var(--ink-soft);
 }
 
 /* ------------------------------------------------------------------ game */

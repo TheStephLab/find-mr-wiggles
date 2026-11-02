@@ -32,49 +32,54 @@ function platform(t) {
   return { canvas, step, timers, frames };
 }
 
-test('Classic skips simulation and unchanged rendering, but keeps timer, camera, pause and finding responsive', t => {
+test('the game simulates behind the start card and keeps timer, camera, pause, hints and finding responsive', t => {
   const p = platform(t);
   let result;
-  const game = createGame({ canvas: p.canvas, scene: SCENES[4], level: 3, seed: 19, mode: 'classic', onFound: r => { result = r; } });
+  const game = createGame({ canvas: p.canvas, scene: SCENES[4], level: 3, seed: 19, onFound: r => { result = r; } });
   let updates = 0;
-  game.world.update = () => { updates++; };
-  for (let i = 0; i < 200; i++) p.step();
-  assert.equal(game.renderStats.needsRefine, false);
-  const prepared = game.sprites.stats.rendered;
+  const update = game.world.update;
+  game.world.update = dt => { updates++; update(dt); };
+  for (let i = 0; i < 20; i++) p.step();
+  assert.equal(updates, 20, 'normal sprite warmup retains the moving crowd');
+  assert.equal(game.elapsed, 0, 'warmup does not start the search clock');
+  assert.ok(game.sprites.stats.rendered > 0);
   const drawn = game.renderStats.frames;
-  const target = game.world.wigglesPoint();
   game.start();
   p.step(500);
   assert.equal(game.elapsed, 500, 'wall-clock timer does not discard slow-frame time');
   for (let i = 0; i < 20; i++) p.step();
-  assert.equal(game.renderStats.frames, drawn, 'no redraws for an unchanged illustration');
-  assert.equal(game.sprites.stats.rendered, prepared, 'no ongoing pose rasterization');
-  assert.equal(updates, 0, 'the runtime never calls Classic world simulation');
+  assert.equal(game.renderStats.frames, drawn + 21);
+  assert.equal(updates, 41);
+  assert.equal(game.hint(), true);
+  assert.equal(game.hint(), false, 'hint cooldown still applies');
+  assert.equal(game.stats.hintsUsed, 1);
   game.pause();
   const elapsed = game.elapsed;
+  const worldTime = game.world.time;
   p.step(10000);
   assert.equal(game.elapsed, elapsed);
+  assert.equal(game.world.time, worldTime);
   game.resume();
+  const scale = game.camera.scale;
   game.zoomBy(2);
-  for (let i = 0; i < 200; i++) p.step();
-  assert.ok(game.renderStats.frames > drawn, 'camera changes redraw and refine');
-  assert.deepEqual(game.world.wigglesPoint(), target, 'camera actions never relocate the target');
-  const pose = JSON.stringify(game.world.wiggles);
+  assert.ok(game.camera.scale > scale);
+  const target = game.world.wigglesPoint();
   centreOn(game.camera, target.x, target.y, 2);
   const point = worldToScreen(game.camera, target.x, target.y);
   for (const type of ['pointerdown', 'pointerup']) p.canvas.dispatchEvent(Object.assign(new Event(type), {
     pointerId: 1, pointerType: 'touch', clientX: point.x, clientY: point.y,
   }));
   assert.equal(game.state, 'found');
-  assert.equal(JSON.stringify(game.world.wiggles), pose, 'finding cannot change a frozen pose');
+  assert.equal(game.world.wiggles.state, 'fixed');
+  assert.equal(game.world.wiggles.action, 'wave', 'found target celebrates normally');
   p.timers.forEach(fn => fn());
-  assert.equal(result.mode, 'classic');
-  assert.equal(result.difficulty, 3);
+  assert.deepEqual(result, { timeMs: elapsed, misses: 0, hintsUsed: 1, difficulty: 3 });
+  assert.equal(Object.hasOwn(game, 'mode'), false);
   game.destroy();
   assert.equal(p.frames.size, 0);
 });
 
-test('Animated gameplay retains live simulation and redraws', t => {
+test('gameplay retains live simulation and redraws', t => {
   const p = platform(t);
   const game = createGame({ canvas: p.canvas, scene: SCENES[2], level: 1, seed: 7 });
   let updates = 0;
@@ -86,9 +91,9 @@ test('Animated gameplay retains live simulation and redraws', t => {
   game.destroy();
 });
 
-test('keyboard crosshair reaches an illustration edge without changing camera limits or target placement', t => {
+test('keyboard crosshair reaches a picture edge without changing camera limits or target placement', t => {
   const p = platform(t);
-  const game = createGame({ canvas: p.canvas, scene: SCENES[3], level: 1, seed: 1, mode: 'classic' });
+  const game = createGame({ canvas: p.canvas, scene: SCENES[3], level: 1, seed: 1 });
   game.start();
   const target = game.world.wigglesPoint();
   centreOn(game.camera, game.camera.worldW, game.camera.worldH / 2, game.camera.maxScale);
@@ -100,4 +105,28 @@ test('keyboard crosshair reaches an illustration edge without changing camera li
   assert.equal(game.camera.x, game.camera.worldW - game.camera.viewW / game.camera.scale);
   assert.deepEqual(game.world.wigglesPoint(), target);
   game.destroy();
+});
+
+test('reduced motion slows simulation independently of the wall-clock timer', t => {
+  const p = platform(t);
+  const game = createGame({ canvas: p.canvas, scene: SCENES[0], level: 1, seed: 7, reducedMotion: true });
+  game.start();
+  p.step(40);
+  assert.equal(game.elapsed, 40);
+  assert.ok(Math.abs(game.world.time - .04 * .55) < 1e-10);
+  game.destroy();
+});
+
+test('destroying a found game cancels its pending result callback', t => {
+  const p = platform(t);
+  let results = 0;
+  const game = createGame({ canvas: p.canvas, scene: SCENES[0], level: 1, seed: 7, onFound: () => { results++; } });
+  game.start();
+  game.world.isWigglesAt = () => true;
+  p.canvas.dispatchEvent(Object.assign(new Event('keydown'), { key: 'Enter' }));
+  assert.equal(game.state, 'found');
+  game.destroy();
+  p.timers.forEach(fn => fn());
+  assert.equal(results, 0);
+  assert.equal(p.frames.size, 0);
 });

@@ -1,5 +1,4 @@
 import { clampLevel, DEFAULT_LEVEL } from './difficulty.js';
-import { MODES, normaliseMode } from './mode.js';
 
 /**
  * Local-only progress persistence (no accounts). Everything lives under one
@@ -7,13 +6,13 @@ import { MODES, normaliseMode } from './mode.js';
  * localStorage is unavailable (e.g. private browsing or blocked cookies).
  */
 export const STORAGE_KEY = 'find-mr-wiggles:progress';
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export function defaultState() {
   return {
     version: SCHEMA_VERSION,
-    settings: { difficulty: DEFAULT_LEVEL, reducedMotion: false, mode: 'animated' },
-    modes: { animated: { scenes: {} }, classic: { scenes: {} } },
+    settings: { difficulty: DEFAULT_LEVEL, reducedMotion: false },
+    scenes: {},
   };
 }
 
@@ -26,15 +25,18 @@ function memoryStorage() {
   };
 }
 
-function resolveStorage(storage) {
+function reportStorageError(error) {
+  console.warn(error.message, error);
+}
+
+function resolveStorage(storage, onError) {
   if (storage) return storage;
   try {
     const ls = globalThis.localStorage;
-    const probe = `${STORAGE_KEY}:probe`;
-    ls.setItem(probe, '1');
-    ls.removeItem(probe);
+    if (!ls) throw new Error('localStorage is not supported');
     return ls;
-  } catch {
+  } catch (cause) {
+    onError(new Error('Local progress storage is unavailable. Progress will only last for this visit.', { cause }));
     return memoryStorage();
   }
 }
@@ -57,32 +59,40 @@ function sanitiseSceneRecord(raw) {
   };
 }
 
-/** Parse + validate unknown JSON into a well-formed state. Never throws. */
-export function parseState(json) {
+/** Parse and validate a save, reporting invalid data before using in-memory defaults. */
+export function parseState(json, { onError = reportStorageError } = {}) {
+  return readState(json, onError).state;
+}
+
+function readState(json, onError) {
   const state = defaultState();
-  if (!json) return state;
+  const unchanged = { state, needsMigration: false };
+  if (!json) return unchanged;
   let raw;
   try {
     raw = JSON.parse(json);
-  } catch {
-    return state;
+  } catch (cause) {
+    onError(new Error('Saved progress could not be parsed. Playing with fresh in-memory progress.', { cause }));
+    return unchanged;
   }
-  if (!raw || typeof raw !== 'object' || ![1, SCHEMA_VERSION].includes(raw.version)) return state;
+  if (!raw || typeof raw !== 'object' || ![1, 2, SCHEMA_VERSION].includes(raw.version)) {
+    onError(new Error('Saved progress has an unsupported format. Playing with fresh in-memory progress.'));
+    return unchanged;
+  }
   if (raw.settings && typeof raw.settings === 'object') {
     state.settings.difficulty = clampLevel(raw.settings.difficulty ?? DEFAULT_LEVEL);
     state.settings.reducedMotion = Boolean(raw.settings.reducedMotion);
-    state.settings.mode = raw.version === 1 ? 'animated' : normaliseMode(raw.settings.mode);
   }
-  for (const mode of MODES) {
-    const scenes = raw.version === 1 ? (mode === 'animated' ? raw.scenes : null) : raw.modes?.[mode]?.scenes;
-    if (scenes && typeof scenes === 'object') {
-      for (const [id, rec] of Object.entries(scenes)) {
-        const clean = sanitiseSceneRecord(rec);
-        if (clean) state.modes[mode].scenes[id] = clean;
-      }
+  // One-way v2 migration: only the moving-game history survives, regardless of
+  // the old selection. v1 and v3 both keep their records at the top level.
+  const scenes = raw.version === 2 ? raw.modes?.animated?.scenes : raw.scenes;
+  if (scenes && typeof scenes === 'object') {
+    for (const [id, rec] of Object.entries(scenes)) {
+      const clean = sanitiseSceneRecord(rec);
+      if (clean) state.scenes[id] = clean;
     }
   }
-  return state;
+  return { state, needsMigration: raw.version !== SCHEMA_VERSION };
 }
 
 export function starsFor({ hintsUsed = 0, misses = 0 } = {}) {
@@ -91,17 +101,20 @@ export function starsFor({ hintsUsed = 0, misses = 0 } = {}) {
   return 1;
 }
 
-export function createProgressStore({ storage, key = STORAGE_KEY } = {}) {
-  const backend = resolveStorage(storage);
-  let state = parseState(safeGet(backend, key));
+export function createProgressStore({ storage, key = STORAGE_KEY, onError = reportStorageError } = {}) {
+  const backend = resolveStorage(storage, onError);
+  const loaded = readState(safeGet(backend, key, onError), onError);
+  let state = loaded.state;
 
   function persist() {
     try {
       backend.setItem(key, JSON.stringify(state));
-    } catch {
-      /* Quota or privacy errors: keep playing with in-memory state. */
+    } catch (cause) {
+      onError(new Error('Progress could not be saved on this device. Your current progress remains in memory.', { cause }));
     }
   }
+
+  if (loaded.needsMigration) persist();
 
   return {
     getState: () => structuredClone(state),
@@ -118,22 +131,16 @@ export function createProgressStore({ storage, key = STORAGE_KEY } = {}) {
       persist();
     },
 
-    setMode(mode) {
-      state.settings.mode = normaliseMode(mode);
-      persist();
-      return state.settings.mode;
-    },
-
-    getScene(id, mode = state.settings.mode) {
-      const rec = state.modes[normaliseMode(mode)].scenes[id];
+    getScene(id) {
+      const rec = state.scenes[id];
       return rec ? structuredClone(rec) : null;
     },
 
-    isCompleted: (id, mode = state.settings.mode) => Boolean(state.modes[normaliseMode(mode)].scenes[id]?.completed),
+    isCompleted: (id) => Boolean(state.scenes[id]?.completed),
 
     /** Scenes unlock in order: the first is always open; each completion opens the next. */
-    isUnlocked(sceneIds, id, mode = state.settings.mode) {
-      const scenes = state.modes[normaliseMode(mode)].scenes;
+    isUnlocked(sceneIds, id) {
+      const { scenes } = state;
       const index = sceneIds.indexOf(id);
       if (index < 0) return false;
       if (index === 0 || scenes[id]?.completed) return true;
@@ -141,16 +148,16 @@ export function createProgressStore({ storage, key = STORAGE_KEY } = {}) {
     },
 
     /** The scene "Play" should launch: first incomplete unlocked scene, else the first. */
-    nextSceneId(sceneIds, mode = state.settings.mode) {
-      const scenes = state.modes[normaliseMode(mode)].scenes;
+    nextSceneId(sceneIds) {
+      const { scenes } = state;
       for (const id of sceneIds) {
-        if (!scenes[id]?.completed) return this.isUnlocked(sceneIds, id, mode) ? id : sceneIds[0];
+        if (!scenes[id]?.completed) return this.isUnlocked(sceneIds, id) ? id : sceneIds[0];
       }
       return sceneIds[0];
     },
 
-    recordCompletion(id, { timeMs, difficulty, mode = state.settings.mode, hintsUsed = 0, misses = 0, now = new Date() }) {
-      const scenes = state.modes[normaliseMode(mode)].scenes;
+    recordCompletion(id, { timeMs, difficulty, hintsUsed = 0, misses = 0, now = new Date() }) {
+      const { scenes } = state;
       const level = clampLevel(difficulty);
       const rec = scenes[id] ?? { completed: false, plays: 0, best: {}, stars: 0, lastCompletedAt: null };
       const previousBest = rec.best[level];
@@ -175,10 +182,11 @@ export function createProgressStore({ storage, key = STORAGE_KEY } = {}) {
   };
 }
 
-function safeGet(backend, key) {
+function safeGet(backend, key, onError) {
   try {
     return backend.getItem(key);
-  } catch {
+  } catch (cause) {
+    onError(new Error('Saved progress could not be read on this device. Playing with fresh in-memory progress.', { cause }));
     return null;
   }
 }

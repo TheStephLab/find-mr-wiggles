@@ -5,7 +5,8 @@ import { agentPose, agentBounds } from './agents.js';
 import { createSpriteCache } from './sprite-cache.js';
 
 const MAX_CACHE_PIXELS = 9_000_000; // stays well under mobile canvas limits
-const MAX_DETAIL_PIXELS = 6_000_000;
+const MAX_DETAIL_PIXELS = 4_000_000;
+const MAX_PROP_PIXELS = 2_000_000;
 const TINY_PX = 7; // characters shorter than this on screen are drawn as simple blocks
 const SETTLE_MS = 120; // rebuild the sharp close-up floor once the camera pauses
 
@@ -34,21 +35,15 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
   let camChangedAt = 0;
   let budgetMs = spriteBudgetMs;
   let budgetCount = Infinity;
-  let needsRefine = true;
-  let floorPending = false;
-  const stats = { frames: 0 };
+  const stats = { frames: 0, propRasters: 0, propHits: 0 };
+  const propCache = new Map();
+  let propPixels = 0;
+  let propRenders = 0;
   const sprites = useSprites && people !== 'simple' ? createSpriteCache() : null;
   const drawList = [];
   const requests = [];
   const poses = new Map();
   const segments = levelSegments(world);
-  const illustration = world.mode === 'classic' ? [...world.props, ...world.agents, ...world.dynamic.flatMap(d => d.parts?.() ?? [])].sort((a, b) => a.sortY - b.sortY) : null;
-  const illustrationBounds = new WeakMap();
-  const illustrationPoses = new WeakMap();
-  for (const item of illustration ?? []) {
-    illustrationBounds.set(item, item.look ? agentBounds(item, P) : item.bounds);
-    if (item.look) illustrationPoses.set(item, agentPose(item, world.time));
-  }
 
   function makeCanvas(w, h) {
     return typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
@@ -126,7 +121,6 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
   }
 
   function chooseFloor(camera, s, view, now) {
-    floorPending = false;
     if (!base) base = renderRegion({ x: 0, y: 0, w: PW, h: PH }, baseScale);
     if (people === 'simple' || s <= baseScale * 1.35) return base;
     const key = `${camera.x.toFixed(1)}|${camera.y.toFixed(1)}|${camera.scale.toFixed(3)}`;
@@ -134,9 +128,9 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
       camKey = key;
       camChangedAt = now;
     }
-    const fits = detail && detail.scale >= s * 0.75 && detail.scale <= s * 1.8 && contains(detail.rect, view);
+    const neededScale = detail && Math.min(s, Math.sqrt(MAX_DETAIL_PIXELS / Math.max(1, detail.rect.w * detail.rect.h)));
+    const fits = detail && detail.scale >= neededScale * 0.75 && detail.scale <= s * 1.8 && contains(detail.rect, clampRect(view, PW, PH));
     if (fits) return detail;
-    floorPending = now - camChangedAt < SETTLE_MS;
     if (now - camChangedAt >= SETTLE_MS) {
       const pad = 0.2;
       const rect = clampRect({ x: view.x - view.w * pad, y: view.y - view.h * pad, w: view.w * (1 + pad * 2), h: view.h * (1 + pad * 2) }, PW, PH);
@@ -159,11 +153,49 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
     ctx.drawImage(layer.canvas, (x0 - rect.x) * scale, (y0 - rect.y) * scale, (x1 - x0) * scale, (y1 - y0) * scale, x0, y0, x1 - x0, y1 - y0);
   }
 
+  function drawProp(item, t, s) {
+    let entry = propCache.get(item);
+    if (people !== 'simple' && item.cache && (!entry || entry.scale < s) && propRenders < 2 && globalThis.document?.fonts?.status !== 'loading') {
+      const scale = 2 ** (Math.ceil(Math.log2(s) * 2) / 2);
+      const rect = { x: item.bounds.x - 2, y: item.bounds.y - 2, w: item.bounds.w + 4, h: item.bounds.h + 4 };
+      const w = Math.ceil(rect.w * scale), h = Math.ceil(rect.h * scale);
+      const pixels = w * h, oldPixels = entry ? entry.canvas.width * entry.canvas.height : 0;
+      if (w <= 4096 && h <= 4096 && pixels <= MAX_PROP_PIXELS / 2) {
+        while (propPixels - oldPixels + pixels > MAX_PROP_PIXELS) {
+          let oldest;
+          for (const [prop, cached] of propCache) {
+            if (prop !== item && cached.used !== stats.frames && (!oldest || cached.used < oldest[1].used)) oldest = [prop, cached];
+          }
+          if (!oldest) break;
+          propPixels -= oldest[1].canvas.width * oldest[1].canvas.height;
+          propCache.delete(oldest[0]);
+        }
+        if (propPixels - oldPixels + pixels <= MAX_PROP_PIXELS) {
+          const out = makeCanvas(w, h), o = out.getContext('2d');
+          o.setTransform(scale, 0, 0, scale, -rect.x * scale, -rect.y * scale);
+          propRenders++;
+          item.draw(o, t, P);
+          if (globalThis.document?.fonts?.status === 'loading') return item.draw(ctx, t, P);
+          entry = { canvas: out, rect: { ...rect, w: w / scale, h: h / scale }, scale, used: stats.frames };
+          propCache.set(item, entry);
+          propPixels += pixels - oldPixels;
+          stats.propRasters++;
+        }
+      }
+    }
+    if (entry && entry.scale >= s) {
+      entry.used = stats.frames;
+      stats.propHits++;
+      const { rect } = entry;
+      ctx.drawImage(entry.canvas, rect.x, rect.y, rect.w, rect.h);
+    } else item.draw(ctx, t, P);
+  }
+
   function render(camera, t, overlay) {
     stats.frames++;
-    if (world.mode === 'classic') t = world.time;
-    const detailed = (item) => world.mode === 'classic' || camera.scale * 40 * P.s(item.y) >= TINY_PX;
-    const density = (item) => Math.max(world.mode === 'classic' ? 1 : 0, s * P.s(item.y));
+    propRenders = 0;
+    const detailed = (item) => camera.scale * 40 * P.s(item.y) >= TINY_PX;
+    const density = (item) => s * P.s(item.y);
     const dpr = fixedDpr ?? Math.min(globalThis.devicePixelRatio || 1, 2.5);
     const s = camera.scale * dpr;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -179,25 +211,25 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
     drawList.length = 0;
     for (const d of world.dynamic) {
       if (d.parts) {
-        if (!illustration) for (const part of d.parts()) if (rectsOverlap(part.bounds, view)) drawList.push(part);
+        for (const part of d.parts()) if (rectsOverlap(part.bounds, view)) drawList.push(part);
       } else if (!d.bounds || rectsOverlap(d.bounds, view)) {
         d.draw(ctx, t, P);
       }
     }
-    if (illustration) {
-      for (const item of illustration) if (rectsOverlap(illustrationBounds.get(item), view)) drawList.push(item);
-    } else {
-      for (const p of world.props) if (rectsOverlap(p.bounds, view)) drawList.push(p);
-      for (const a of world.agents) if (rectsOverlap(agentBounds(a, P), view)) drawList.push(a);
-      drawList.sort((a, b) => a.sortY - b.sortY);
+    for (const p of world.props) if (rectsOverlap(p.bounds, view)) {
+      drawList.push(p);
+      const cached = propCache.get(p);
+      if (cached) cached.used = stats.frames;
     }
+    for (const a of world.agents) if (!a.hidden && rectsOverlap(agentBounds(a, P), view)) drawList.push(a);
+    drawList.sort((a, b) => a.sortY - b.sortY);
     sprites?.beginFrame(budgetMs, budgetCount);
     requests.length = 0;
     poses.clear();
     if (sprites) {
       for (const item of drawList) {
         if (!item.look || !detailed(item)) continue;
-        const pose = illustrationPoses.get(item) ?? agentPose(item, t);
+        const pose = agentPose(item, t);
         poses.set(item, pose);
         requests.push({ look: item.look, pose, q: density(item) });
       }
@@ -205,10 +237,9 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
     }
     const ex = -camera.x * s;
     const ey = -camera.y * s;
-    needsRefine = floorPending;
     for (const item of drawList) {
       if (!item.look) {
-        item.draw(ctx, t, P);
+        drawProp(item, t, s);
         continue;
       }
       const k = P.s(item.y);
@@ -224,7 +255,6 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
         continue;
       }
       const hit = sprites.get(item.look, pose, density(item), false);
-      if (!hit || (hit.entry && !hit.exact)) needsRefine = true;
       if (!hit) {
         drawPerson(ctx, item.look, pose, px, py, 'simple', k);
       } else if (hit.direct) {
@@ -244,8 +274,8 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
     render,
     sprites,
     stats,
-    get needsRefine() { return needsRefine; },
-    get cachePixels() { return (base?.canvas.width * base?.canvas.height || 0) + (detail?.canvas.width * detail?.canvas.height || 0) + (sprites?.pageCount ?? 0) * 1024 ** 2; },
+    get cachePixels() { return (base?.canvas.width * base?.canvas.height || 0) + (detail?.canvas.width * detail?.canvas.height || 0) + propPixels + (sprites?.pageCount ?? 0) * 1024 ** 2; },
+    get propCachePixels() { return propPixels; },
     /** Time (ms) and number of new character sprites allowed per frame. */
     setSpriteBudget(ms, count = Infinity) {
       budgetMs = ms;
@@ -254,6 +284,8 @@ export function createRenderer(canvas, world, { dpr: fixedDpr, sprites: useSprit
     invalidate() {
       base = null;
       detail = null;
+      propCache.clear();
+      propPixels = 0;
     },
   };
 }
