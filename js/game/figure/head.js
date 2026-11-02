@@ -92,7 +92,7 @@ const WIGGLES_BACK = [[-0.62, 0.35, 0.3], [-0.74, 0.6, 0.29], [-0.68, 0.86, 0.26
 const WIGGLES_FRINGE = [[-0.44, 0.22, 0.17], [-0.22, 0.12, 0.19], [0.03, 0.1, 0.19], [0.27, 0.13, 0.18], [0.46, 0.25, 0.16], [-0.56, 0.46, 0.16], [0.56, 0.46, 0.16]];
 
 // ------------------------------------------------------------------ front & back
-export function drawHeadFront(ctx, look, R, cx, back) {
+export function drawHeadFront(ctx, look, R, cx, back, quarter = false) {
   const w = R.headW;
   const h = R.headH;
   const top = R.top;
@@ -109,9 +109,12 @@ export function drawHeadFront(ctx, look, R, cx, back) {
   if (back) {
     hairBack(ctx, look, cx, top, w, h);
   } else {
+    ctx.save();
+    if (quarter) { ctx.translate(cx + w * .17, 0); ctx.scale(.77, 1); ctx.translate(-cx, 0); }
     face(ctx, look, cx, top, w, h);
-    hairFront(ctx, look, cx, top, w, h);
     if (look.glasses) glassesFront(ctx, look.glasses, cx, top, w, h);
+    ctx.restore();
+    hairFront(ctx, look, cx, top, w, h);
   }
   if (look.hat) hatFront(ctx, look.hat, cx, top, w, h, back);
 }

@@ -94,8 +94,8 @@ export function gridLines(ctx, rect, size, colour, view = rect, lw = 1) {
   ctx.stroke();
 }
 
-/** Analogue clock that shows the real local time (flat; use inside onFront). */
-export function clockFace(ctx, cx, cy, r, now = new Date()) {
+/** Simulation seconds from 10:08; pausing and reduced motion affect every live clock equally. */
+export function clockFace(ctx, cx, cy, r, time = 0) {
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.fillStyle = '#fffdf3';
@@ -103,9 +103,17 @@ export function clockFace(ctx, cx, cy, r, now = new Date()) {
   ctx.strokeStyle = '#3a2e1e';
   ctx.lineWidth = r * 0.14;
   ctx.stroke();
-  const h = now.getHours() % 12;
-  const m = now.getMinutes();
-  const s = now.getSeconds();
+  const seconds = 10 * 3600 + 8 * 60 + time;
+  const h = seconds / 3600;
+  const m = seconds / 60;
+  const s = seconds;
+  for (let i = 0; i < 12; i++) {
+    const a = i * Math.PI / 6;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.sin(a) * r * .79, cy - Math.cos(a) * r * .79);
+    ctx.lineTo(cx + Math.sin(a) * r * .89, cy - Math.cos(a) * r * .89);
+    ctx.lineWidth = r * .045; ctx.strokeStyle = '#343b40'; ctx.stroke();
+  }
   const hand = (angle, len, w, colour) => {
     ctx.beginPath();
     ctx.moveTo(cx, cy);
@@ -114,9 +122,9 @@ export function clockFace(ctx, cx, cy, r, now = new Date()) {
     ctx.lineWidth = w;
     ctx.stroke();
   };
-  hand(((h + m / 60) / 12) * Math.PI * 2, r * 0.5, r * 0.12, '#222');
+  hand((h / 12) * Math.PI * 2, r * 0.5, r * 0.12, '#222');
   hand((m / 60) * Math.PI * 2, r * 0.75, r * 0.08, '#222');
-  hand((s / 60) * Math.PI * 2, r * 0.8, r * 0.04, '#c0392b');
+  hand((s / 60) * Math.PI * 2, r * 0.84, Math.max(.8, r * .055), '#c0392b');
 }
 
 // --------------------------------------------------------------- 3D furniture

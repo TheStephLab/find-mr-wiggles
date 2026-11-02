@@ -56,7 +56,7 @@ export const market = {
     }
     addFountain(kit, W * .5, H * .54, { radius: 58 });
     for (const f of [.08, .92]) {
-      for (const y of [H * .17, H * .53, H * .91]) {
+      for (const y of [H * .17, H * .37, H * .53, H * .74, H * .91]) {
         addTree(kit, W * f, y, 32);
         addBench(kit, { x: W * f - 26, y: y + 24, facing: 'down', wood: '#527c67' });
       }

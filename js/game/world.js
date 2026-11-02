@@ -3,8 +3,7 @@ import { getDifficulty, worldSize, crowdSize } from '../core/difficulty.js';
 import { createKit } from '../scenes/kit.js';
 import { createAgent, updateAgent, servedByQueue, agentBounds, planPath } from './agents.js';
 import { createCrowdLook, WIGGLES_LOOK, pickName } from './people.js';
-import { normaliseMode } from '../core/mode.js';
-import { composeClassic } from './classic.js';
+import { createCrowd } from './crowd.js';
 
 /**
  * Build a playable world from a scene definition.
@@ -14,12 +13,11 @@ import { composeClassic } from './classic.js';
  * World coordinates are the ground plan (x, y) plus height z; `world.P`
  * projects them into the perspective picture the camera looks at.
  */
-export function createWorld(scene, { level = 3, seed, perfFactor = 1, mode = 'animated' } = {}) {
-  mode = normaliseMode(mode);
+export function createWorld(scene, { level = 3, seed, perfFactor = 1 } = {}) {
   const difficulty = getDifficulty(level);
   const { width, height } = worldSize(difficulty, scene.aspect);
   const rng = createRng(seed);
-  const kit = createKit({ rng, width, height, difficulty, view: scene.view, mode });
+  const kit = createKit({ rng, width, height, difficulty, view: scene.view });
   scene.build(kit);
   kit.finalize();
 
@@ -30,7 +28,6 @@ export function createWorld(scene, { level = 3, seed, perfFactor = 1, mode = 'an
 
   const world = {
     scene,
-    mode,
     seed: rng.seed,
     difficulty,
     width,
@@ -58,11 +55,12 @@ export function createWorld(scene, { level = 3, seed, perfFactor = 1, mode = 'an
     floorZ: kit.floorZ,
     visibility: kit.visibility,
     isHiddenSpot: kit.isHiddenSpot,
+    blockers: kit.blockers,
   };
 
   const homeRadius = Math.max(width, height) * 0.28;
   const placeAgent = (agent, { visibleOnly = false } = {}) => {
-    const free = kit.pois.filter((p) => !p.queue && p.occupants < p.capacity && (!p.roles || p.roles.includes(agent.role)));
+    const free = kit.pois.filter((p) => !p.queue && !p.visit && p.occupants < p.capacity && (!p.roles || p.roles.includes(agent.role)) && (!p.requires || p.requires(agent)));
     if (free.length && rng.chance(0.55)) {
       const poi = rng.pick(free);
       poi.occupants++;
@@ -121,16 +119,21 @@ export function createWorld(scene, { level = 3, seed, perfFactor = 1, mode = 'an
   placeAgent(wiggles, { visibleOnly: true });
   world.agents.splice(rng.int(0, world.agents.length), 0, wiggles);
   world.wiggles = wiggles;
+  world.crowd = createCrowd(world);
 
   world.update = (dt) => {
-    if (mode === 'classic') return;
-    world.time += dt;
-    for (const d of world.dynamic) d.update?.(dt, world.time);
-    for (const q of world.queues) {
-      const done = q.update(dt, (m) => m.atFront);
-      if (done) servedByQueue(done, world);
+    const steps = Math.max(1, Math.ceil(dt / .05));
+    const slice = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      world.time += slice;
+      for (const d of world.dynamic) d.update?.(slice, world.time);
+      world.crowd.rebuild();
+      for (const q of world.queues) {
+        const done = q.update(slice, (m) => m.atFront && (!q.available || q.available()));
+        if (done) servedByQueue(done, world);
+      }
+      for (const a of world.agents) updateAgent(a, world, slice);
     }
-    for (const a of world.agents) updateAgent(a, world, dt);
   };
 
   /** Picture-space bounds of an agent. */
@@ -140,6 +143,7 @@ export function createWorld(scene, { level = 3, seed, perfFactor = 1, mode = 'an
   world.agentAt = (px, py, tolerance = 0) => {
     let hit = null;
     for (const a of world.agents) {
+      if (a.hidden) continue;
       const b = agentBounds(a, P);
       if (px >= b.x - tolerance && px <= b.x + b.w + tolerance && py >= b.y - tolerance && py <= b.y + b.h + tolerance) {
         if (!hit || a.sortY > hit.sortY) hit = a;
@@ -149,6 +153,7 @@ export function createWorld(scene, { level = 3, seed, perfFactor = 1, mode = 'an
   };
 
   world.isWigglesAt = (px, py, tolerance = 0) => {
+    if (wiggles.hidden) return false;
     const b = agentBounds(wiggles, P);
     return px >= b.x - tolerance && px <= b.x + b.w + tolerance && py >= b.y - tolerance && py <= b.y + b.h + tolerance;
   };
@@ -160,6 +165,5 @@ export function createWorld(scene, { level = 3, seed, perfFactor = 1, mode = 'an
     a.sortY = a.y + a.sortBias;
     a.z = kit.zAt(a.x, a.y);
   }
-  if (mode === 'classic') composeClassic(world, kit);
   return world;
 }

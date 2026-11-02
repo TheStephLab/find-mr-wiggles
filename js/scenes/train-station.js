@@ -3,6 +3,7 @@ import { tiles, gridLines, box, text, clockFace, lampPost3d, createPigeons, fron
 import { drawBox, onFront, sideQuad, poly } from './draw3d.js';
 import { projectBox } from '../core/projection.js';
 import { drawMainlineCar, drawMetroCar } from './transport.js';
+import { startVisit } from '../game/agents.js';
 
 const DESTINATIONS = ['Puddleford', 'Gigglewick', 'Mumbleton-on-Sea', 'Wobblecombe', 'Snoringham', 'Fizzbury Parkway', 'Little Dithering', 'Bramblemoor', 'Kettlewhistle', 'Upper Noodleby', 'Dozy Hollow', 'Crumbleton', 'Wigglesworth Bay'];
 const LIVERIES = [
@@ -59,7 +60,12 @@ export const trainStation = {
       }
     }
 
-    kit.backdrop = (ctx) => stationBackdrop(ctx, P, W, H, divTop, tracks, kit.clock);
+    kit.backdrop = (ctx) => stationBackdrop(ctx, P, W, H, divTop, tracks);
+    kit.addProp({
+      kind: 'clock', y: 0,
+      box: { x: W / 2 - 28, y: 0, w: 56, d: 1, h: 56, z: E + 40 },
+      draw: (ctx, t) => onFront(ctx, P, W / 2, 0, E + 68, c => clockFace(c, 0, 0, 26, t)),
+    });
 
     kit.addFloor({ x: 0, y: 0, w: W, h: bufferY }, (ctx, view) => {
       ctx.fillStyle = '#8a7d6b';
@@ -140,6 +146,7 @@ export const trainStation = {
     kit.block({ x: 0, y: divTop - 16, w: W, h: divBot - divTop + 16 });
     const ads = Array.from({ length: Math.ceil(W / 300) }, () => rng.pick(['Wobble Jelly!', 'Fizzbury Pop', 'Snooze Beds', 'Crumb Cakes', 'Visit Puddleford', 'Ride the Kestrel']));
     kit.addProp({
+      cache: true,
       y: divTop,
       box: { x: 0, y: divTop - 2, w: W, d: 4, h: E + 28, z: 0 },
       draw: (ctx) => {
@@ -186,9 +193,10 @@ export const trainStation = {
     const clockX = W / 2;
     const clockY = Math.round(bufferY + (divTop - bufferY) * 0.6);
     kit.addProp({
+      kind: 'clock',
       y: clockY,
       box: { x: clockX - 20, y: clockY - 6, w: 40, d: 8, h: 132, z: E },
-      draw: (ctx) => onFront(ctx, P, clockX, clockY, E, (c) => clockPost(c, kit.clock)),
+      draw: (ctx, t) => onFront(ctx, P, clockX, clockY, E, c => clockPost(c, t)),
       solid: { x: clockX - 4, y: clockY, w: 8, d: 0, h: 100, z: E },
     });
     kit.block({ x: clockX - 8, y: clockY - 6, w: 16, h: 8 });
@@ -254,8 +262,30 @@ export const trainStation = {
     scatter(kit, conRect, 1, 40, 40, (x, y) => {
       const fx = x;
       const fy = y + 36;
-      kit.addProp({ y: fy, box: { x: fx - 2, y: fy - 26, w: 40, d: 28, h: 70, z: E }, draw: (ctx) => photoBooth3d(ctx, P, fx, fy, E), solid: { x: fx, y: fy, w: 36, d: 0, h: 66, z: E } });
+      const controller = { inside: new Set(), completed: 0 }, reservations = new Map();
+      kit.addProp({ kind: 'photo-booth', y: fy, box: { x: fx - 2, y: fy - 26, w: 40, d: 28, h: 70, z: E }, draw: (ctx, t) => {
+        photoBooth3d(ctx, P, fx, fy, E);
+        onFront(ctx, P, fx, fy, E, c => {
+          box(c, 8, -54, 22, 7, controller.inside.size ? '#c94746' : '#3a8b61', null, 0, 1);
+          text(c, controller.inside.size ? `${controller.inside.size} IN USE` : 'AVAILABLE', 19, -50.5, { size: 3.5, colour: '#fff' });
+          if (controller.inside.size) {
+            box(c, 9, -42, 20, 40, Math.floor(t * 3) % 12 === 0 ? '#fff1c8' : '#652f53', null);
+            for (let k = 0; k < 5; k++) { c.fillStyle = '#894463'; c.fillRect(10 + k * 4, -42, 1, 38); }
+          }
+        });
+      }, solid: { x: fx, y: fy, w: 36, d: 0, h: 66, z: E } });
       kit.block({ x: fx, y: fy - 24, w: 36, h: 25 });
+      kit.poi({
+        kind: 'photo-booth', x: fx + 18, y: fy + 20, capacity: 2, weight: 3,
+        controller, visit: true, requires: a => !a.isWiggles && a.role !== 'staff',
+        reserve(a) { reservations.set(a.id, [...reservations.values()].includes(-7) ? 7 : -7); },
+        release(a) { reservations.delete(a.id); },
+        entry: a => ({ x: fx + 18 + (reservations.get(a.id) ?? 0), y: fy + 12 }),
+        onArrive: (a, world) => {
+          const x = fx + 18 + reservations.get(a.id);
+          startVisit(a, world, { enter: [{ x, y: fy - 8 }], exit: [{ x, y: fy + 28 }], duration: 4, controller });
+        },
+      });
     });
 
     scatter(kit, conRect, kit.count(3, 2), 30, 20, (x, y) => addMachine(kit, x, y + 16, { colour: '#20385e', screen: '#9fe0ff' }));
@@ -276,10 +306,22 @@ export const trainStation = {
         kit.addProp({ y, box: { x: mid - 8, y: y - 4, w: 16, d: 6, h: 86, z: E }, draw: (ctx) => lampPost3d(ctx, P, mid, y, 74, '#2f5a46', E) });
         kit.block({ x: mid - 3, y: y - 3, w: 6, h: 4 });
       }
-      for (let b = 0; b < kit.count(1.2, 1); b++) {
-        const y = rng.range(70, bufferY - 70);
-        if (kit.isFree({ x: mid - 23, y: y - 14, w: 46, h: 14 }, 6)) addBench(kit, { x: mid - 23, y, facing: 'down', wood: '#2f5a46' });
+      for (let y = 55; y < bufferY - 40; y += 100) {
+        if (kit.isFree({ x: mid - 23, y: y - 14, w: 46, h: 14 }, 4)) addBench(kit, { x: mid - 23, y, facing: 'down', wood: '#2f5a46', weight: 1.8, kind: 'platform-seat' });
+        const py = y + 43;
+        if (py < bufferY - 30 && kit.isFree({ x: mid - 13, y: py - 12, w: 26, h: 24 }, 5)) addPlant(kit, mid, py, .8, '#477854');
       }
+      const sy = bufferY * .48;
+      // Open ironwork shelter: only its posts obstruct the walking route.
+      for (const sx of [p.x + 14, p.x + p.w - 14]) {
+        kit.addProp({ cache: true, kind: 'shelter', y: sy, box: { x: sx - 3, y: sy - 5, w: 6, d: 10, h: 92, z: E }, draw: ctx => {
+          drawBox(ctx, P, { x: sx - 2, y: sy - 3, w: 4, d: 6, h: 86, z: E }, { front: '#2f5a46' });
+        } });
+        kit.block({ x: sx - 3, y: sy - 4, w: 6, h: 8 });
+      }
+      kit.addProp({ cache: true, kind: 'shelter-roof', y: sy, box: { x: p.x + 8, y: sy - 32, w: p.w - 16, d: 64, h: 8, z: E + 86 }, draw: ctx => {
+        drawBox(ctx, P, { x: p.x + 8, y: sy - 32, w: p.w - 16, d: 64, h: 5, z: E + 86 }, { front: '#315b48', top: 'rgba(170,205,186,.6)' });
+      } });
       for (let k = 0; k < kit.count(5, 2); k++) {
         const left = rng.chance(0.5);
         const x = left ? p.x + 22 : p.x + p.w - 22;
@@ -304,7 +346,7 @@ export const trainStation = {
 };
 
 // ------------------------------------------------------------------ drawings
-function stationBackdrop(ctx, P, W, H, divTop, tracks, clock) {
+function stationBackdrop(ctx, P, W, H, divTop, tracks) {
   const top = E + WALL;
   // back wall with the station name, a clock and tunnel mouths
   poly(ctx, [P.pt(0, 0, E - 20), P.pt(W, 0, E - 20), P.pt(W, 0, top), P.pt(0, 0, top)], '#a8644a', OUT, 1);
@@ -347,10 +389,6 @@ function stationBackdrop(ctx, P, W, H, divTop, tracks, clock) {
     }
     box(c, W / 2 - 230, -150, 460, 46, '#20385e', OUT, 2, 6);
     text(c, 'WHISTLEBURY JUNCTION', W / 2, -127, { size: 30, colour: '#f2c94c' });
-    c.save();
-    c.translate(W / 2, -68);
-    clockFace(c, 0, 0, 26, clock);
-    c.restore();
   });
   // side walls with tall windows
   for (const x of [0, W]) {
@@ -395,7 +433,7 @@ function departuresBoard(c, w, t) {
   }
 }
 
-function clockPost(c, clock) {
+function clockPost(c, t) {
   c.fillStyle = 'rgba(0,0,0,0.15)';
   c.beginPath();
   c.ellipse(0, 0, 14, 4, 0, 0, Math.PI * 2);
@@ -404,7 +442,7 @@ function clockPost(c, clock) {
   c.fillStyle = '#2f5a46';
   c.fillRect(-3, -100, 6, 92);
   box(c, -18, -128, 36, 30, '#2f5a46', OUT, 1, 6);
-  clockFace(c, 0, -113, 12, clock);
+  clockFace(c, 0, -113, 12, t);
 }
 
 function piano3d(ctx, P, x, y, z) {

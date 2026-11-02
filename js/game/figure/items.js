@@ -140,28 +140,34 @@ function mop(ctx, x0, y0, xHead) {
   ellipse(ctx, xHead + 0.4, -0.5, 2.8, 0.75, 0, '#e8e2c8', '#999', 0.15);
 }
 
-/** A wheeled suitcase whose handle meets the hand at (hx, hy). Side view tilts it behind. */
+/** Grounded luggage geometry, solved from the actual transformed pulling hand. */
+export function suitcaseGeometry(hx, hy, view) {
+  const trail = view === 'side' ? 8 : view === 'quarter' ? 4.5 : 0;
+  const wheel = { x: hx - trail, y: -0.65 };
+  const length = Math.hypot(hx - wheel.x, hy - wheel.y);
+  return { wheel, angle: Math.atan2(hx - wheel.x, wheel.y - hy), length, radius: .65 };
+}
+
+/** The telescopic handle terminates exactly at the hand; wheels stay at y=0. */
 export function drawSuitcase(ctx, look, hx, hy, view) {
   const c = look.carry.color ?? '#555';
-  if (view === 'side') {
-    ctx.save();
-    ctx.translate(hx - 5.2, -0.9);
-    ctx.rotate(-0.42);
-    stroke(ctx, [[2.3, -10], [2.3 + 0.2, -10 - (hy < -15 ? 6.5 : 4)]], '#666', 0.35);
-    rrect(ctx, -0.2, -10.2, 4.8, 10.2, 0.9);
-    shadedFill(ctx, c, -0.2, 4.6);
-    ctx.fillStyle = shade(c, -0.25);
-    ctx.fillRect(-0.2, -6, 4.8, 0.5);
-    ellipse(ctx, 0.6, 0.1, 0.7, 0.7, 0, '#222', null);
-    ctx.restore();
-    return;
-  }
-  stroke(ctx, [[hx, hy + 0.6], [hx, -10.4]], '#666', 0.35);
-  rrect(ctx, hx - 2.6, -10.5, 5.2, 9.6, 0.9);
-  shadedFill(ctx, c, hx - 2.6, hx + 2.6);
+  const { wheel, angle, length, radius } = suitcaseGeometry(hx, hy, view);
+  const width = view === 'side' ? 4.8 : 5.6;
+  ctx.save();
+  ctx.translate(wheel.x, wheel.y);
+  ctx.rotate(angle);
+  stroke(ctx, [[0, -length], [0, -8.5]], '#727b82', .55);
+  stroke(ctx, [[-.65, -length], [.65, -length]], '#28343c', .7);
+  rrect(ctx, -width / 2, -10.6, width, 10.3, 1.1);
+  shadedFill(ctx, c, -width / 2, width / 2);
+  stroke(ctx, [[-width / 2 + .65, -8.8], [-width / 2 + .65, -2]], shade(c, .25), .25);
   ctx.fillStyle = shade(c, -0.25);
-  ctx.fillRect(hx - 2.6, -6.2, 5.2, 0.5);
-  for (const s of [-1.7, 1.7]) ellipse(ctx, hx + s, -0.55, 0.6, 0.55, 0, '#222', null);
+  ctx.fillRect(-width / 2, -5.7, width, .45);
+  ctx.fillStyle = '#e9dcb6';
+  ctx.fillRect(.5, -8.9, 1, 1.5);
+  ctx.restore();
+  ellipse(ctx, wheel.x, wheel.y, radius, radius, 0, '#222b32', null);
+  if (view !== 'side') ellipse(ctx, wheel.x + 2.2, wheel.y, radius, radius, 0, '#222b32', null);
 }
 
 /** Busker's guitar across the body. */

@@ -126,20 +126,21 @@ export function createSpriteCache({ maxPages = defaultPages() } = {}) {
     const frame = spriteFrame(look, pose);
     // Round up: even an exact hit must have enough pixels for the display.
     const bucket = Math.ceil(Math.log2(Math.max(q, 1e-3)) * STEPS);
-    let frames = byLook.get(look);
-    if (!frames) byLook.set(look, (frames = new Map()));
+    let history = byLook.get(look);
+    if (!history) byLook.set(look, (history = { frames: new Map(), families: new Map() }));
+    const { frames, families } = history;
     let buckets = frames.get(frame.key);
     if (!buckets) {
       buckets = new Map();
-      buckets.family = frame.family;
       frames.set(frame.key, buckets);
+      if (!families.has(frame.family)) families.set(frame.family, []);
+      families.get(frame.family).push(buckets);
     }
     const hit = buckets.get(bucket);
     if (hit === 'direct' || valid(hit)) return { look, frame, bucket, buckets, hit, best: hit };
     let best = nearest(buckets, bucket);
-    const family = frame.family;
-    for (const [key, m] of frames) {
-      if (key === frame.key || m.family !== family) continue;
+    for (const m of families.get(frame.family)) {
+      if (m === buckets) continue;
       const e = nearest(m, bucket);
       if (e && (!best || Math.abs(e.bucket - bucket) < Math.abs(best.bucket - bucket))) best = e;
     }

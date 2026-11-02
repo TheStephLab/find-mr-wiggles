@@ -121,23 +121,25 @@ export function sleeveOf(look, side) {
 export function gaitOf(R, p) {
   const moving = p.mode === 'walk' || p.mode === 'jog';
   const jog = p.mode === 'jog';
-  const amp = jog ? 0.6 : 0.36;
-  const kAmp = jog ? 1.55 : 0.95;
+  const stride = jog ? 8.5 : 5.2;
+  const reach = (R.thigh + R.shin) * (jog ? .85 : .93);
+  const hipY = R.ankleY - reach;
   const legs = [0, 1].map((i) => {
-    const a = p.phase + i * Math.PI;
-    const th = moving ? amp * Math.sin(a) : 0;
-    const kf = moving ? kAmp * Math.pow(Math.max(0, Math.cos(a)), 1.3) + 0.05 : 0.02;
+    const a = ((p.phase + i * Math.PI) % TAU + TAU) % TAU;
+    const lift = moving && a > Math.PI ? Math.sin(a - Math.PI) * (jog ? 8 : 3.8) : 0;
+    const ax = moving ? stride * Math.cos(a) : 0;
+    const ay = reach - lift;
+    const distance = Math.min(R.thigh + R.shin - .001, Math.hypot(ax, ay));
+    const bend = Math.acos(Math.max(-1, Math.min(1, (R.thigh ** 2 + distance ** 2 - R.shin ** 2) / (2 * R.thigh * distance))));
+    const th = Math.atan2(ax, ay) + bend;
     const kx = Math.sin(th) * R.thigh;
     const ky = Math.cos(th) * R.thigh;
-    const sa = th - kf;
-    return { th, sa, kx, ky, ax: kx + Math.sin(sa) * R.shin, ay: ky + Math.cos(sa) * R.shin, lift: 0 };
+    const sa = Math.atan2(ax - kx, ay - ky);
+    return { th, sa, kx, ky, ax, ay, lift };
   });
-  const lowest = Math.max(legs[0].ay, legs[1].ay);
-  for (const l of legs) l.lift = lowest - l.ay;
-  const hipY = R.ankleY - lowest;
   const armAmp = jog ? 0.7 : 0.4;
   const arms = [0, 1].map((i) => {
-    const sa = moving ? -armAmp * Math.sin(p.phase + i * Math.PI) : 0.03;
+    const sa = moving ? -armAmp * Math.cos(p.phase + i * Math.PI) : 0.03;
     const fa = sa + (jog ? 1.45 : 0.15 + Math.max(0, sa) * 0.9);
     return { sa, fa };
   });
@@ -184,6 +186,38 @@ export function limb(ctx, x1, y1, r1, x2, y2, r2, colour, dim = false) {
   capsulePath(ctx, x1 - nx * r1 * 0.45, y1 - ny * r1 * 0.45, r1 * 0.24, x2 - nx * r2 * 0.45, y2 - ny * r2 * 0.45, r2 * 0.24);
   ctx.fillStyle = SHINE;
   ctx.fill();
+}
+
+/** A single continuous bent silhouette: no outlined circles breaking the elbow/knee. */
+export function limbChain(ctx, A, B, C, radii, colour, dim = false) {
+  const normal = (a, b) => {
+    const d = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    return [-(b[1] - a[1]) / d, (b[0] - a[0]) / d];
+  };
+  const n = normal(A, B), m = normal(B, C);
+  const mid = [n[0] + m[0], n[1] + m[1]], len = Math.hypot(...mid) || 1;
+  mid[0] /= len; mid[1] /= len;
+  const points = [A, B, C], normals = [n, mid, m];
+  ctx.beginPath();
+  for (const sign of [1, -1]) {
+    const order = sign === 1 ? [0, 1, 2] : [2, 1, 0];
+    for (const i of order) {
+      const x = points[i][0] + normals[i][0] * radii[i] * sign;
+      const y = points[i][1] + normals[i][1] * radii[i] * sign;
+      if (i === 0 && sign === 1) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+  }
+  ctx.closePath();
+  const c = dim ? shade(colour, -.2) : colour;
+  const gradient = ctx.createLinearGradient(B[0] - radii[1], B[1], B[0] + radii[1], B[1]);
+  gradient.addColorStop(0, shade(colour, .13)); gradient.addColorStop(.45, c); gradient.addColorStop(1, shade(colour, -.24));
+  ctx.fillStyle = gradient; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = .2; ctx.stroke();
+  ctx.strokeStyle = shade(colour, -.16); ctx.lineWidth = .14;
+  ctx.beginPath();
+  ctx.moveTo(B[0] - mid[0] * radii[1] * .55, B[1] - mid[1] * radii[1] * .55);
+  ctx.lineTo(B[0] + mid[0] * radii[1] * .4, B[1] + mid[1] * radii[1] * .4);
+  ctx.stroke();
 }
 
 /** Stripes across a limb (sleeves, socks). `fill` makes stripes touch (multi-colour bands). */

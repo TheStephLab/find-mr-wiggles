@@ -8,7 +8,7 @@
  * caches animation frames as sprites (see sprite-cache.js). `spriteFrame()`
  * quantises a pose into a small set of cacheable frames.
  */
-import { TAU, INK, shade, rigOf, outfitOf, sleeveOf, gaitOf, limb, limbBands, limbDots, ellipse, rrect, stitches } from './figure/core.js';
+import { TAU, INK, shade, rigOf, outfitOf, sleeveOf, gaitOf, limb, limbChain, limbBands, limbDots, ellipse, rrect, stitches } from './figure/core.js';
 import { drawHeadFront, drawHeadSide } from './figure/head.js';
 import { drawTorso, drawPelvis, drawSkirt, drawScarf, drawSatchel, drawBackpack, drawCameraStrap } from './figure/clothes.js';
 import { drawHeld, drawSuitcase, drawGuitar, drawMopSweep } from './figure/items.js';
@@ -21,15 +21,19 @@ const ACTION_RATE = { wave: 1.6, clap: 2.2, piano: 1.4, guitar: 1.8, clean: 0.7 
 export function drawPerson(ctx, look, pose, x, y, lod = 'full', k = 1) {
   const s = (look.height / 40) * k;
   const p = resolvePose(pose);
-  const flip = p.dir === 'left' ? -1 : 1;
+  const flip = p.dir.includes('left') ? -1 : 1;
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(s * flip, s);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  if (lod === 'full' && look.carry?.type === 'suitcase') {
+    const h = pullingHand(look, pose);
+    drawSuitcase(ctx, look, h.x, h.y, h.view);
+  }
   if (lod === 'simple') drawSimple(ctx, look, p);
   else if (p.dir === 'left' || p.dir === 'right') drawSide(ctx, look, p);
-  else drawFront(ctx, look, p, p.dir === 'up');
+  else drawFront(ctx, look, p, p.dir.startsWith('up'));
   ctx.restore();
 }
 
@@ -51,12 +55,14 @@ export function spriteFrame(look, pose) {
   const cyc = moving ? Math.floor((((pose.phase / TAU) % 1) + 1) % 1 * WALK_FRAMES) % WALK_FRAMES : 0;
   const rate = ACTION_RATE[pose.action] ?? 0;
   const af = rate ? Math.floor((pose.t ?? 0) * rate * ACTION_FRAMES) % ACTION_FRAMES : 0;
-  const dir = pose.dir === 'left' ? 'right' : pose.dir;
+  const dir = (pose.dir ?? 'down').replace('left', 'right');
   const c = look.carry;
+  // A brief collision stop can hold the last upright pose, not lose all detail.
+  const stance = moving || mode === 'stand' ? 'upright' : mode;
   return {
     key: `${dir}|${mode}|${cyc}|${pose.action ?? ''}|${af}|${c ? c.type + (c.color ?? '') : ''}`,
-    family: `${dir}|${mode}|${pose.action ?? ''}|${c ? c.type + (c.color ?? '') : ''}`,
-    mirror: pose.dir === 'left',
+    family: `${dir}|${stance}|${pose.action ?? ''}|${c ? c.type + (c.color ?? '') : ''}`,
+    mirror: (pose.dir ?? '').includes('left'),
     pose: { dir, mode, phase: (cyc / WALK_FRAMES) * TAU, action: pose.action ?? null, anim: af / ACTION_FRAMES },
   };
 }
@@ -73,8 +79,8 @@ export function spriteBounds(look) {
     Rt = 16;
   }
   if (t === 'suitcase' || t === 'guitar' || t === 'mop' || t === 'umbrella') {
-    L = -17;
-    Rt = 17;
+    L = -23;
+    Rt = 23;
   }
   if (look.hat?.type === 'chef' || look.hat?.type === 'wiggles') T = Math.min(T, -58);
   return { L: L * f, R: Rt * f, T: T * f, B: 3 * f };
@@ -87,8 +93,11 @@ function drawLeg(ctx, look, R, hip, knee, ankle, dim) {
   const b = look.bottom;
   const trousers = b.type === 'trousers';
   const skin = look.skin;
-  limb(ctx, hip[0], hip[1], R.thighR, knee[0], knee[1], R.kneeR, trousers ? b.color : skin, dim);
-  limb(ctx, knee[0], knee[1], R.kneeR, ankle[0], ankle[1], R.ankleR, trousers ? b.color : look.socks ? look.socks.colors[0] : skin, dim);
+  if (trousers || !look.socks) limbChain(ctx, hip, knee, ankle, [R.thighR, R.kneeR, R.ankleR], trousers ? b.color : skin, dim);
+  else {
+    limb(ctx, hip[0], hip[1], R.thighR, knee[0], knee[1], R.kneeR, skin, dim);
+    limb(ctx, knee[0], knee[1], R.kneeR, ankle[0], ankle[1], R.ankleR, look.socks.colors[0], dim);
+  }
   if (look.socks) limbBands(ctx, knee[0], knee[1], R.kneeR, ankle[0], ankle[1], R.ankleR, sockColours(look), 0.8, { fill: true });
   if (b.type === 'shorts') {
     const mx = hip[0] + (knee[0] - hip[0]) * 0.62;
@@ -118,6 +127,10 @@ function shoeFront(ctx, look, x, y, back, dim) {
   ctx.fillStyle = shade(c, -0.35);
   ctx.fillRect(x - 1.05, y + 0.95, 2.1, 0.3);
   if (!back) ellipse(ctx, x - 0.25, y + 0.15, 0.45, 0.25, 0, 'rgba(255,255,255,0.22)', null);
+  if (!back) {
+    ctx.strokeStyle = '#d7d4cb'; ctx.lineWidth = .12;
+    for (const dy of [-.2, .15, .5]) { ctx.beginPath(); ctx.moveTo(x - .5, y + dy); ctx.lineTo(x + .4, y + dy); ctx.stroke(); }
+  }
   if (look.shoes.curly && !back) {
     ctx.beginPath();
     ctx.arc(x, y - 0.1, 0.45, Math.PI * 0.2, Math.PI * 1.9);
@@ -146,6 +159,8 @@ function shoeSide(ctx, look, x, y, angle, dim) {
   ctx.stroke();
   ctx.fillStyle = shade(c, -0.35);
   ctx.fillRect(-1.0, 0.95, 3.7, 0.3);
+  ctx.strokeStyle = '#d7d4cb'; ctx.lineWidth = .12;
+  for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(.1 + i * .4, -.4 + i * .15); ctx.lineTo(.1 + i * .4, .15 + i * .15); ctx.stroke(); }
   if (look.shoes.curly) {
     ctx.beginPath();
     ctx.moveTo(2.6, 0.7);
@@ -162,15 +177,13 @@ function drawArm(ctx, look, R, o, arm, sleeve, dim) {
   const { S, E, H } = arm;
   const skin = look.skin;
   if (o.shortSleeves) {
-    limb(ctx, S[0], S[1], R.armR, E[0], E[1], R.elbowR, skin, dim);
-    limb(ctx, E[0], E[1], R.elbowR, H[0], H[1], R.wristR, skin, dim);
+    limbChain(ctx, S, E, H, [R.armR, R.elbowR, R.wristR], skin, dim);
     const mx = S[0] + (E[0] - S[0]) * 0.55;
     const my = S[1] + (E[1] - S[1]) * 0.55;
     limb(ctx, S[0], S[1], R.armR * 1.18, mx, my, R.armR * 1.1, sleeve.c, dim);
     if (!dim && sleeve.pat === 'stripes') limbBands(ctx, S[0], S[1], R.armR * 1.18, mx, my, R.armR * 1.1, [sleeve.c2], 1.4);
   } else {
-    limb(ctx, S[0], S[1], R.armR * 1.08, E[0], E[1], R.elbowR * 1.05, sleeve.c, dim);
-    limb(ctx, E[0], E[1], R.elbowR * 1.05, H[0], H[1], R.wristR * 1.12, sleeve.c, dim);
+    limbChain(ctx, S, E, H, [R.armR * 1.08, R.elbowR * 1.05, R.wristR * 1.12], sleeve.c, dim);
     if (!dim && sleeve.pat === 'stripes') {
       limbBands(ctx, S[0], S[1], R.armR * 1.08, E[0], E[1], R.elbowR * 1.05, [sleeve.c2], 1.3);
       limbBands(ctx, E[0], E[1], R.elbowR * 1.05, H[0], H[1], R.wristR * 1.12, [sleeve.c2], 1.3);
@@ -186,13 +199,35 @@ function drawArm(ctx, look, R, o, arm, sleeve, dim) {
 }
 
 function hand(ctx, skin, E, H, dim) {
-  const a = Math.atan2(H[1] - E[1], H[0] - E[0]);
-  const cx = H[0] + Math.cos(a) * 0.8;
-  const cy = H[1] + Math.sin(a) * 0.8;
+  const { x: cx, y: cy, angle: a } = handPosition(E, H);
   const c = dim ? shade(skin, -0.2) : skin;
   ellipse(ctx, cx, cy, 1.0, 0.66, a, c, INK, 0.2);
   ellipse(ctx, cx + Math.cos(a + 1.2) * 0.55, cy + Math.sin(a + 1.2) * 0.55, 0.45, 0.25, a - 0.6, c, INK, 0.15);
   return { x: cx, y: cy };
+}
+
+function handPosition(E, H) {
+  const angle = Math.atan2(H[1] - E[1], H[0] - E[0]);
+  return { x: H[0] + Math.cos(angle) * .8, y: H[1] + Math.sin(angle) * .8, angle };
+}
+
+/** In the canonical (right-facing when mirrored) sprite frame, with a fixed floor. */
+export function pullingHand(look, pose) {
+  const p = resolvePose(pose), R = rigOf(look), g = gaitOf(R, p);
+  const side = p.dir === 'right' || p.dir === 'left';
+  const quarter = p.dir.includes('-');
+  const sit = p.mode === 'sit';
+  const back = p.dir.startsWith('up');
+  const arm = armPoses(look, R, g, p, side ? 'side' : back ? 'back' : 'front', sit).L;
+  const h = handPosition(arm.E, arm.H);
+  if (side) {
+    const hipY = sit ? -12 * 40 / look.height : g.hipY;
+    const angle = sit ? 0 : g.lean;
+    return { x: h.x * Math.cos(angle) - (h.y - R.hipJ) * Math.sin(angle),
+      y: hipY + h.x * Math.sin(angle) + (h.y - R.hipJ) * Math.cos(angle), view: 'side' };
+  }
+  const dy = sit ? -12 * 40 / look.height - R.hipJ : g.dy;
+  return { x: h.x * (quarter ? .82 : 1), y: h.y + dy + (quarter ? h.x * .08 : 0), view: quarter ? 'quarter' : back ? 'back' : 'front' };
 }
 
 function neck(ctx, look, R, cx) {
@@ -219,6 +254,10 @@ function armPoses(look, R, g, p, view, sit) {
       const S = [sx * (R.shW - 0.9), sY];
       const E = [S[0] + sx * 0.5, S[1] + UA * Math.cos(a.sa)];
       out[key] = { S, E, H: [E[0] + sx * 0.1 - sx * Math.max(0, Math.sin(a.fa)) * 1.4, E[1] + R.foreArm * Math.cos(a.fa)] };
+      if (p.dir.includes('-')) {
+        out[key].E[0] += Math.sin(a.sa) * UA * .6;
+        out[key].H[0] += (Math.sin(a.sa) * UA + Math.sin(a.fa) * R.foreArm) * .6;
+      }
     }
   }
   const set = (key, E, H) => {
@@ -246,8 +285,8 @@ function armPoses(look, R, g, p, view, sit) {
   }
   switch (p.action) {
     case 'phone':
-      if (side) set('L', [1.4, sY + 4.2], [R.headW * 0.35, R.top + R.headH * 0.62]);
-      else set('L', [cs * R.shW * 0.78, sY + 4.2], [cs * R.headW * 0.4, R.top + R.headH * 0.62]);
+      if (side) set(carry === 'suitcase' ? 'R' : 'L', [1.4, sY + 4.2], [R.headW * 0.35, R.top + R.headH * 0.62]);
+      else set(carry === 'suitcase' ? 'R' : 'L', [cs * R.shW * 0.78, sY + 4.2], [cs * R.headW * 0.4, R.top + R.headH * 0.62]);
       break;
     case 'wave':
       if (side) set('L', [2.2, sY - 1.5], [3.2 + sw * 1.2, sY - R.foreArm - 1.2]);
@@ -304,11 +343,13 @@ function drawFront(ctx, look, p, back) {
   const cs = back ? -1 : 1;
   const view = back ? 'back' : 'front';
   const dy = sit ? (-12 * 40) / look.height - R.hipJ : g.dy;
+  const quarter = p.dir.includes('-');
+  ctx.save();
+  if (quarter) ctx.scale(.82, 1);
   ellipse(ctx, 0, 0, 7 * R.b, 2.1, 0, 'rgba(0,0,0,0.17)', null);
 
   const arms = armPoses(look, R, g, p, view, sit);
   const carryHand = look.carry?.type === 'balloon' ? 'R' : 'L';
-  if (look.carry?.type === 'suitcase') drawSuitcase(ctx, look, arms.L.H[0] + cs * 0.7, arms.L.H[1] + dy, view);
 
   const toward = back ? -1 : 1;
   const legs = g.legs.map((l, i) => {
@@ -318,7 +359,8 @@ function drawFront(ctx, look, p, back) {
       const ky = hy + 1.8;
       return { hip: [sx, hy], knee: [sx * 1.2, ky], ankle: [sx * 1.15, Math.min(R.ankleY, ky + R.shin)], fwd: 0 };
     }
-    return { hip: [sx, hy], knee: [sx * 0.94, hy + l.ky + toward * l.kx * 0.15], ankle: [sx * 0.86, hy + l.ay + toward * l.ax * 0.15], fwd: l.ax * toward };
+    const stride = quarter ? l.ax * .68 : 0;
+    return { hip: [sx, hy], knee: [sx * .94 + (quarter ? l.kx * .68 : 0), hy + l.ky + toward * l.kx * .15], ankle: [sx * .86 + stride, hy + l.ay + toward * l.ax * .15], fwd: l.ax * toward };
   });
   legs.sort((a, b) => a.fwd - b.fwd);
   for (const l of legs) {
@@ -328,6 +370,7 @@ function drawFront(ctx, look, p, back) {
 
   ctx.save();
   ctx.translate(0, dy);
+  if (quarter) ctx.transform(1, .08, 0, 1, 0, 0);
   drawPelvis(ctx, look, R, view, 0);
   drawSkirt(ctx, look, R, view, 0, sit);
   neck(ctx, look, R, 0);
@@ -341,9 +384,10 @@ function drawFront(ctx, look, p, back) {
   for (const key of back ? ['L', 'R'] : ['R', 'L']) hands[key] = drawArm(ctx, look, R, o, arms[key], sleeveOf(look, key), false);
   if (p.action === 'clean') drawMopSweep(ctx, hands.L.x, hands.L.y, p.anim, view);
   if (look.carry?.type !== 'suitcase') drawHeld(ctx, look, R, hands[carryHand], view, p);
-  else if (p.action === 'phone') drawHeld(ctx, { carry: null }, R, hands.L, view, p);
+  else if (p.action === 'phone') drawHeld(ctx, { carry: null }, R, hands.R, view, p);
   if (p.action === 'read' && !back) newspaper(ctx, R);
-  drawHeadFront(ctx, look, R, 0, back);
+  drawHeadFront(ctx, look, R, quarter ? .65 : 0, back, quarter);
+  ctx.restore();
   ctx.restore();
 }
 
@@ -403,12 +447,6 @@ function drawSide(ctx, look, p) {
   const [near, far] = legPts;
   drawLeg(ctx, look, R, far.hip, far.knee, far.ankle, true);
   shoeSide(ctx, look, far.ankle[0], far.ankle[1], far.angle, true);
-  if (look.carry?.type === 'suitcase') {
-    ctx.save();
-    ctx.translate(0, hipY - R.hipJ);
-    drawSuitcase(ctx, look, arms.L.H[0], arms.L.H[1], 'side');
-    ctx.restore();
-  }
   drawLeg(ctx, look, R, near.hip, near.knee, near.ankle, false);
   shoeSide(ctx, look, near.ankle[0], near.ankle[1], near.angle, false);
 

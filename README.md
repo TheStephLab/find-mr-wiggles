@@ -1,6 +1,6 @@
 # Find Mr. Wiggles
 
-A busy seek-and-find web game with original storybook artwork. Mr. Wiggles has wandered off again. Search a living crowd, or take your time with a dense still illustration in **Classic Mode**.
+A busy seek-and-find web game with original storybook artwork. Mr. Wiggles has wandered off again. Search a living crowd across five bustling locations.
 
 **Play:** https://thestephlab.github.io/find-mr-wiggles/
 
@@ -14,13 +14,12 @@ A busy seek-and-find web game with original storybook artwork. Mr. Wiggles has w
 - **Detailed transport**: rounded mainline cabs, roof equipment and bogies; cream-and-teal metro coaches with sliding doors; and fictional airliners with tapered fuselages, swept wings, engine fans and landing gear.
 - **Realistic people**: real-world proportions (bigger heads for children), jointed limbs with a proper walking and jogging gait, and shaded clothes, faces, hair and hats, drawn from the front, back and side.
 - **Mr. Wiggles is always the same**: striped teal and orange hat with a feather, purple curly hair, mismatched glasses, a pink nose, a rainbow scarf, a patchwork coat, a satchel, striped socks, curly boots and a knobbly lantern stick. A new random seed puts him somewhere different every game.
-- **Five locations**, all fictional and available in both modes:
+- **Five locations**, all fictional:
   1. **Whistlebury Junction**, a train station with platforms, a concourse and a metro hall.
   2. **Skyhaven International**, an airport with an apron, gates, travelators, security, check-in and baggage reclaim.
   3. **Copperleaf Galleria**, with an upper shopping gallery, escalators, food court and coin fountain.
   4. **Little Lantern Market**, a village square of produce stalls, flower sellers, cafes and delivery activity.
   5. **Bramblewick Fairground**, with the moving Moonwheel, carousel, game stalls, queues and performers.
-- **Classic Mode**, in Settings: five deliberately composed still panoramas with luggage mishaps, musicians, book piles, picnic groups, portraits, flower tables and toy collections. Poses, vehicles, clock faces, fountains and rides never advance. Camera controls, the search timer and hints remain responsive. All imagery is original; no published puzzle compositions or franchise characters are reproduced.
 - **Five difficulty levels** (Relaxed → Expert). Higher levels give a bigger scene, a bigger crowd, more props, more of the crowd in his colours, a slower hint and a less forgiving tap. They also add more *look-alikes* who share some of his traits but never his hat and hair together.
 
   | Level | Crowd | Look-alikes | Max shared traits | Hint cooldown |
@@ -31,9 +30,9 @@ A busy seek-and-find web game with original storybook artwork. Mr. Wiggles has w
   | Tricky | ~350 | 30% | 2 | 20 s |
   | Expert | ~430 | 36% | 3 | 25 s |
 
-  Animated crowds are capped at 480, and low-powered devices get about 25% fewer moving people. Classic compositions aim for 900 / 1,450 / 2,100 / 2,800 / 3,500 people respectively, subject to safe available space, with additional narrative groups. They do not run crowd simulation.
+  Crowds are capped at 480, and low-powered devices get about 25% fewer moving people.
 - **Pinch to zoom and drag to pan** on touch screens. Mouse wheel, trackpad pinch and keyboard work too.
-- **Progress saved locally** with `localStorage`. There are no accounts. Each mode has separate scene unlocks, completions and difficulty-specific best times. Changing mode during a search explicitly ends that search and opens a fresh start card; its timer and target are never transferred.
+- **Progress saved locally** with `localStorage`. There are no accounts. Scene unlocks, completions and difficulty-specific best times stay on your device.
 - **Hints, stars and wrong-guess quips**: tap the wrong person and you'll find out who they are.
 - **Works offline** as an installable PWA, with self-hosted fonts and no runtime dependencies.
 - **Accessible**: keyboard play with a crosshair, screen-reader announcements, native `<dialog>`s, reduced-motion support and a "calmer crowds" setting.
@@ -67,7 +66,6 @@ js/main.js                     App controller: screens, dialogs, settings, progr
 js/core/                       Pure, framework-free utilities (unit-tested)
   rng.js                         Seeded PRNG (mulberry32)
   storage.js                     Versioned localStorage progress with safe fallbacks
-  mode.js                        Mode normalization, labels and run-setting identity
   difficulty.js                  Difficulty presets → world size, crowd, props, decoys, hints
   projection.js                  One-point perspective: world (x, y, z) → picture
   camera.js                      Pan/zoom/pinch maths
@@ -79,8 +77,8 @@ js/game/
   figure/                        Figure parts: core (rig, gait, shaded limbs), head, clothes, items
   sprite-cache.js                Budgeted atlas of pre-rendered character frames
   agents.js                      Crowd behaviour state machine (travel/activity/queue/fixed)
+  crowd.js                       Bounded spatial neighbour steering and safe arrivals reentry
   world.js                       Builds a world from a scene + difficulty + seed
-  classic.js                     Seeded narrative composition, frozen poses, safe static target
   renderer.js                    Perspective floor cache, culling, depth sorting, sprite blits
   input.js                       Pointer Events: drag, pinch, tap, wheel, inertia
   game.js                        One play-through: loop, timer, guesses, hints, celebration
@@ -91,6 +89,7 @@ js/scenes/
   draw3d.js                      3D helpers: extruded boxes, camera-facing planes, side quads
   props.js                       Reusable 3D props (benches, kiosks, pillars, escalators…)
   transport.js                   Detailed transport artwork; cached aircraft and metro bodies
+  flight.js                      Aircraft/gate lifecycle, continuous flight geometry and runway reservation
   venue-props.js                 Shared facades, trees, tables, fountains and bunting
   train-station.js, airport.js   Transport locations
   galleria.js, market.js,
@@ -98,18 +97,18 @@ js/scenes/
 sw.js, manifest.webmanifest    Offline support / installable app
 ```
 
-**Rendering.** The world is a ground plan (x across, y into the scene, z up). A one-point perspective camera projects it into a *picture* that you pan and zoom over. Far things shrink and converge, floors foreshorten, and people and props stand upright. The backdrop and floor are rendered once: the flat floor plan is drawn in bands and warped into perspective strip by strip (Mode 7 style). When you zoom in past that bitmap's resolution, a sharp copy of just the visible area is rebuilt once the camera settles. Props are real extruded boxes, or artwork on camera-facing planes. Everything is depth-sorted by its nearest ground line, so people walk behind and in front of things. Labels too small to read are drawn as smudges.
+**Rendering.** The world is a ground plan (x across, y into the scene, z up). A one-point perspective camera projects it into a *picture* that you pan and zoom over. Far things shrink and converge, floors foreshorten, and people and props stand upright. The backdrop and floor are rendered once: the flat floor plan is drawn in bands and warped into perspective strip by strip (Mode 7 style). When you zoom in past that bitmap's resolution, a sharp copy of just the visible area is rebuilt once the camera settles. Its fit check uses picture-clipped coverage and the achievable pixel budget, so picture edges and high-density displays cannot trigger a fresh raster every frame. Props are real extruded boxes, or artwork on camera-facing planes. Everything is depth-sorted by its nearest ground line, so people walk behind and in front of things. Labels too small to read are drawn as smudges.
 
-**Characters and smooth frame rates.** Drawing detailed figures directly is too expensive for hundreds of people every frame. Each animation frame is therefore rendered into a 1024² sprite atlas and blitted with `drawImage`. Frames are keyed by look, quantised pose (8 walk frames, 4 action frames, left mirrored from right) and scale bucket (steps of about 26%, rounded up to avoid under-resolved exact hits). Smoothness comes first:
+Immutable structures can opt into `kit.addProp({ cache: true, ... })`: benches, planters, kiosk artwork, pillars and station ironwork are rasterized at sufficient display density, then still blitted in their original depth positions. Preparation is limited to two structures per frame, visible entries are pinned against eviction, oversized/unprepared structures remain full vectors, and fonts finish loading before artwork is retained. Clocks, photo-booth feedback, gate displays and moving scenery stay live by default. The former six-megapixel detail allowance is partitioned into four megapixels for the close-up floor and two for static props, without increasing the total cache cap. Normal desktop and emulated-phone close-ups remain below the floor cap; unusually large high-density viewports trade some floor resolution for bounded memory, not character detail.
+
+**Characters and smooth frame rates.** Continuous shaded limb silhouettes join at elbows and knees. A two-bone gait solves the joints from grounded stance and lifted swing trajectories, so a planted foot moves backwards relative to the body rather than sliding forwards. Facing follows the final projected movement, including ramps: eight directions use five canonical sprite orientations, with left views mirrored. Rolling luggage is solved from the transformed pulling hand to a fixed ground contact; body bob/lean cannot lift its wheels or detach the handle. Drawing detailed figures directly is too expensive for hundreds of people every frame. Each animation frame is therefore rendered into a 1024² sprite atlas and blitted with `drawImage`. Frames are keyed by look, quantised pose (8 walk frames, 4 action frames) and scale bucket (steps of about 26%, rounded up to avoid under-resolved exact hits). Smoothness comes first:
 
 - Preparation runs before depth-ordered drawing. People without compatible detailed coverage come first, then under-resolved sprites, then animation refinements. The least recently prepared look wins ties, so the back of the crowd cannot monopolise the budget. Mr. Wiggles and decoys use exactly the same rules.
 - Each playing frame may prepare at most 4 sprites, with a target of about 5 ms. Canvas rasterisation is deferred, so counting sprites matters as much as timing them. The budget drops automatically after slow frames. One sprite may exceed the estimated time target rather than leaving large figures permanently unprepared; the count limit still applies.
-- Until a sprite is ready, the closest cached scale or animation frame with the same direction, mode, action and carried item stands in. Old suitcase/action artwork cannot return after a state change. Cold starts or newly revealed people can briefly use a cheap block figure while coverage converges.
+- Until a sprite is ready, the closest cached scale or animation frame with the same direction, upright/seated stance, action and carried item stands in. Brief walking/jogging stops can hold an existing full-detail upright pose instead of losing coverage; exact frames still distinguish walking, jogging and standing. Seated, wrong-facing, old suitcase and wrong-action artwork cannot leak into that fallback. Lookups index only the compatible family rather than scanning the person's entire pose history. Cold starts, new facings and newly revealed people can briefly use a cheap figure while their bounded preparation converges.
 - The scene is built behind the start card, so the visible crowd is prepared before the clock starts.
 - Atlas pages are recycled least-recently-used first, capped by device memory (8–20 pages).
-- Tiny Animated figures (under 7 CSS pixels) and scene thumbnails intentionally use simple rendering, and very close-up figures that exceed atlas limits are drawn directly as vectors. Classic gameplay always prepares the detailed figure model at a minimum one-pixel-per-world-unit density.
-
-**Still illustrations.** `composeClassic` arranges location-specific narrative islands and their posed participants, real seated/counter groups, and dense crossing streams. It snapshots moving transport once and fixes world/pose time, including station clocks. A spatial index checks conservative full artwork extents, including non-solid decoration, foreground arms and carried items, before choosing among reference-height-safe target placements. At least five of eight hat/head/body samples must remain visible; hit testing uses the same picture coordinates and foreground checks. The camera never changes composition or target. A new seed changes group anchors, looks and safe target selection. Classic skips `world.update` entirely. The start card shows preparation status and waits for visible full detail before enabling the search clock. After sprite/floor convergence, the game skips unchanged Canvas rendering; only camera changes, refinement and active UI overlays redraw. It retains the existing bounded floor/detail caches and atlas pages rather than allocating a full-world HiDPI bitmap. Thumbnail floors have a separate half-megapixel cap.
+- Tiny figures (under 7 CSS pixels) and scene thumbnails intentionally use simple rendering, and very close-up figures that exceed atlas limits are drawn directly as vectors. Thumbnail floors have a separate half-megapixel cap.
 
 Frame rates depend on the device, viewport, pixel density and camera movement; headless desktop measurements are not a physical-phone guarantee. Cache counters expose rendered sprites, exact hits, compatible fallbacks, misses and coarse fallbacks (more than one scale bucket below the requested resolution) for repeatable coverage and zoom checks.
 
@@ -118,6 +117,12 @@ Frame rates depend on the device, viewport, pixel density and camera movement; h
 **Occlusion.** Solid props register picture-space occluders. `kit.visibility(x, y)` samples points over a standing person to work out how much of them the camera can see. Activity spots that would be hidden are removed. People never idle out of sight, and Mr. Wiggles always spawns in view. Path costs through hidden ground are tripled, so people only pass behind things briefly. Tests cap how long Mr. Wiggles can stay hidden.
 
 **Crowd AI.** Each scene lays out a walkable navigation graph (grids around obstacles, plus one-way escalator and travelator links) and *points of interest* (bench seats, kiosk counters, platform edges, the departures board…). Agents pick nearby interests weighted by a "home" area, pathfind with Dijkstra, then do something there. Queues, such as check-in, security and the café, are first-come-first-served, and some even change people: checking in removes your suitcase, and baggage reclaim gives you one.
+
+Local steering uses a 48-unit spatial grid, at most 96 candidates and 24 neighbours per mover, swept body-clearance checks and a stable keep-right preference. A brief retreat detour breaks congested crossings. Ordinary graph vertices are clear-corner waypoints, not exact appointments that force everyone into the same point. Exact queue and escalator corridors remain constrained; nobody is pushed sideways off a level or into a prop. Long simulation calls subdivide into steps of at most 50 ms. Small initial overlaps can clear naturally; the crowd is not culled or hidden to fake separation.
+
+**Station life.** Both analogue clocks are live depth layers driven by simulation seconds, including readable second hands; the cached background cannot freeze them. Platform benches have individual reserved sit/dwell/leave activities, with open ironwork shelters and planters. The photo booth reserves at most two non-target visitors: approach, enter, four-second use, then exit. Its curtain and occupancy light follow actual visitors. Mr. Wiggles never enters a hidden interior.
+
+**Airport life.** Every gate owns an aircraft, boarding queue and bridge route. Aircraft progress through boarding, pushback, taxi-out, accelerating takeoff/climb, off-screen wait, approach, descending landing and taxi-in. A FIFO runway reservation prevents conflicting aircraft movements. Boarding stays open while awaiting that slot; the seven-second final call starts only when the runway is reserved, and admitted bridge travellers enter before pushback. Repositioning only happens beyond the projected picture edges. Gate displays and service follow the aircraft state; a closed-gate queue wait is capped at 55 simulation seconds. Non-target travellers visibly walk down the bridge before a bounded off-scene interval and return through an arrivals exit; the target never boards. The reclaim belt has moving slats, rounded ends, oriented grounded bags and an island/signage. Waiting travellers collect an actual nearby circulating bag; missing bags replenish at the feed point, not at arbitrary positions. Terminal planters, extra seating and location-appropriate trees retain their navigation/depth/occlusion geometry across all five locations. Pigeons remain in the station and market.
 
 ## Adding a scene
 
@@ -175,12 +180,16 @@ Frame rates depend on the device, viewport, pixel density and camera movement; h
    - Mr. Wiggles spawns in view and always reappears from behind obstacles
    - the crowd keeps moving and people use escalators where the location has multiple levels
 
-4. Add a location-specific entry to `STORIES` in `js/game/classic.js`, reuse or extend its original illustrated tableaux, and use meaningful scene POIs for static activity groups. Draw scenery from the supplied time, never `Date.now()` or fresh randomness during rendering; use `kit.clock` for clock faces. Dynamic objects must support a stable `parts()` snapshot or a draw function receiving fixed time. Classic tests cover every difficulty and replay seeds, full pose/world stillness, decoy rules and safe click targets. Inspect complete compositions and close-ups as well as running tests; counts alone do not establish visual quality.
+4. Draw animated scenery from the supplied simulation time, never fresh randomness during rendering. Put clocks and other changing details in live props, not the cached backdrop. Dynamic objects can expose `update(dt, time)` and either `draw(ctx, time, P)` or depth-sorted `parts()`. Inspect complete activity cycles, the whole location and close-ups as well as running tests. `js/game/crowd.js` owns local clearance; `js/scenes/flight.js` owns aircraft geometry/lifecycle. Include new runtime modules in the offline shell.
 
 Useful kit APIs: `addProp` (3D, with `solid` occluders), `addDynamic` (animated things: `draw` underlays or depth-sorted `parts()`, like trains), `poi`, `queue`, `gateQueue` (queue-gated one-way passage), `escalator` (climbs between levels), `travelator`, `station` (stationary staff), `zAt(x, y)`, `visibility(x, y)`, `count(n)` (scales with difficulty) and `isFree(rect)`.
 ## Progress & privacy
 
-Everything is stored under one `localStorage` key (`find-mr-wiggles:progress`) on your device. Nothing is sent anywhere. Schema v2 stores `settings.mode` and separate `modes.animated.scenes` / `modes.classic.scenes` records. Original v1 saves migrate losslessly into Animated, which remains the default; Classic starts its own station-first sequence. Migration is persisted with the next settings/result write. Corrupt or unavailable storage, such as in private browsing, falls back safely to in-memory play. Settings → *Reset progress* clears both histories but retains preferences.
+Everything is stored under one `localStorage` key (`find-mr-wiggles:progress`) on your device. Nothing is sent anywhere. Schema v3 stores one `scenes` history and only `difficulty` / `reducedMotion` settings.
+
+One-way save migration preserves original v1 scene records and v2 `modes.animated.scenes` records, including completions, play counts, stars, timestamps and every difficulty best. Unlocks follow those completions. The old selected setting is ignored; the game always moves. The removed v2 Classic history and mode preference are discarded, never merged or archived. These historical names appear only in this migration documentation and compatibility fixtures; runtime migration reads only the v2 moving-game history. Valid old saves are rewritten immediately as v3. If writing fails, the original durable save remains intact for retry.
+
+Corrupt or unavailable storage, such as in private browsing, is reported with a console warning and falls back to in-memory play; malformed saves are not overwritten on load. Settings → *Reset progress* clears the scene history but retains difficulty and calmer-crowd preferences.
 
 ## Credits
 

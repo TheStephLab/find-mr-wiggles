@@ -125,3 +125,71 @@ test('exact sprites never start below the requested pixel density', () => {
   const hit = cache.get(WIGGLES_LOOK, walk(0), 1.1);
   assert.ok(2 ** (hit.entry.bucket / 3) >= 1.1);
 });
+
+test('brief walking stops retain full upright detail without borrowing seated or wrong-facing poses', () => {
+  const cache = createSpriteCache();
+  cache.beginFrame(1000);
+  const walking = cache.get(WIGGLES_LOOK, walk(1, 'down-right'), 3);
+  cache.beginFrame(0);
+  assert.equal(cache.get(WIGGLES_LOOK, { ...walk(1, 'down-right'), mode: 'stand' }, 3)?.entry, walking.entry);
+  assert.equal(cache.get(WIGGLES_LOOK, { ...walk(1, 'down-right'), mode: 'sit' }, 3), null);
+  assert.equal(cache.get(WIGGLES_LOOK, walk(1, 'up-right'), 3), null);
+});
+
+test('fallback lookup work is bounded by the current family, not the entire pose history', t => {
+  const cache = createSpriteCache();
+  cache.beginFrame(1000);
+  for (const dir of ['right', 'down-right', 'down', 'up-right', 'up']) {
+    for (const mode of ['walk', 'jog', 'stand', 'sit']) {
+      for (let frame = 0; frame < 8; frame++) cache.get(WIGGLES_LOOK, { dir, mode, phase: frame * Math.PI / 4 }, 1);
+    }
+  }
+  let visits = 0;
+  for (const method of [Symbol.iterator, 'values']) {
+    const original = Map.prototype[method];
+    t.mock.method(Map.prototype, method, function* () {
+      for (const entry of original.call(this)) { visits++; yield entry; }
+    });
+  }
+  cache.beginFrame(0);
+  assert.ok(cache.get(WIGGLES_LOOK, walk(1, 'down-right'), 3)?.entry);
+  assert.ok(visits <= 40, `${visits} map entries visited for one current-family fallback`);
+});
+
+test('slow-frame preparation does not perpetually trade sharp walkers for new facing families', t => {
+  const cache = createSpriteCache({ maxPages: 8 });
+  const rng = createRng(33);
+  const looks = Array.from({ length: 30 }, () => createCrowdLook(rng, { role: 'commuter' }));
+  const directions = ['right', 'down-right', 'down', 'down-left', 'left', 'up-left', 'up', 'up-right'];
+  const streaks = new Map();
+  let degraded = 0, draws = 0, longestStreak = 0;
+  for (let frame = 0; frame < 900; frame++) {
+    const requests = looks.map((look, i) => ({
+      look,
+      pose: {
+        dir: directions[Math.floor((frame + i * 7) / 42) % directions.length],
+        mode: (frame + i * 11) % 37 < 8 ? 'stand' : 'walk',
+        phase: frame * .42 + i, t: frame * .05,
+      },
+      q: frame < 60 ? .8 : 3.2 + Math.sin(frame * .035 + i) * .15,
+    }));
+    cache.beginFrame(1000, 1);
+    cache.prepare(requests);
+    for (const request of requests) {
+      const before = cache.stats.coarseFallbacks;
+      const hit = cache.get(request.look, request.pose, request.q, false);
+      if (frame >= 240) {
+        draws++;
+        const bad = !hit || cache.stats.coarseFallbacks > before;
+        if (bad) degraded++;
+        const streak = bad ? (streaks.get(request.look) ?? 0) + 1 : 0;
+        streaks.set(request.look, streak);
+        longestStreak = Math.max(longestStreak, streak);
+      }
+    }
+  }
+  t.diagnostic(`${degraded}/${draws} degraded draws after warmup; longest streak ${longestStreak} frames; ${cache.pageCount} atlas pages`);
+  assert.ok(degraded / draws < .02, `${degraded}/${draws} persistently under-resolved or missing moving figures`);
+  assert.ok(longestStreak <= 20, 'each visible person regains adequate detail within one simulated second');
+  assert.ok(cache.pageCount <= 8);
+});

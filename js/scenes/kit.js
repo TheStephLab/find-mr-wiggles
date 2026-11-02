@@ -14,15 +14,13 @@ import { drawEscalator, drawTravelator } from './props.js';
  *  - underlay: animated things on the ground that people stand on (escalators…)
  *  - props, dynamic parts and people: depth-sorted by their nearest ground y
  */
-export function createKit({ rng, width, height, difficulty, view = {}, mode = 'animated' }) {
+export function createKit({ rng, width, height, difficulty, view = {} }) {
   const nav = new NavGraph();
   const P = createProjection({ width, height, ...view });
   const pending = [];
 
   const kit = {
     rng,
-    mode,
-    clock: mode === 'classic' ? new Date('2026-10-24T10:08:00Z') : undefined,
     W: width,
     H: height,
     d: difficulty,
@@ -91,10 +89,11 @@ export function createKit({ rng, width, height, difficulty, view = {}, mode = 'a
      * A depth-sorted prop. `y` is its nearest ground line (used for sorting).
      * `box` ({x, y, w, d, h, z}) sizes it for culling; `solid` boxes also hide
      * whoever is behind them (used for the "always reappears" checks).
+     * Only immutable artwork may opt into the bounded bitmap cache.
      */
-    addProp({ y, box, bounds, draw, block = null, solid = null }) {
+    addProp({ y, box, bounds, draw, block = null, solid = null, kind = null, cache = false }) {
       const picture = bounds ?? projectBox(P, box, 6);
-      const prop = { sortY: y, bounds: picture, draw };
+      const prop = { sortY: y, bounds: picture, draw, kind, cache };
       kit.props.push(prop);
       if (block) kit.block(block);
       const solids = solid === true ? [box] : solid ? [].concat(solid) : [];

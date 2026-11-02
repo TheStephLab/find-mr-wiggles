@@ -3,6 +3,8 @@
  *   idle → (choose task) → travel → activity | queue → idle …
  * Stationed agents (shopkeepers, buskers, desk staff) stay in a 'fixed' state.
  */
+import { spriteBounds } from './draw-person.js';
+import { pointInRect, segmentIntersectsRect } from '../core/geometry.js';
 export const ESCALATOR_SPEED = 30;
 export const TRAVELATOR_SPEED = 42;
 const ARRIVE_EPS = 0.75;
@@ -46,13 +48,13 @@ export function createAgent({ look, x, y, nodeId, rng, home, homeRadius = 500, i
   };
 }
 
-function faceTowards(agent, dx, dy) {
-  if (Math.abs(dx) > Math.abs(dy) * 0.8) agent.dir = dx < 0 ? 'left' : 'right';
-  else agent.dir = dy < 0 ? 'up' : 'down';
+export function travelFacing(dx, dy) {
+  const directions = ['right', 'down-right', 'down', 'down-left', 'left', 'up-left', 'up', 'up-right'];
+  return directions[(Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) + 8) % 8];
 }
 
 /** Move towards (tx, ty). Returns true on arrival. */
-function stepTowards(agent, tx, ty, speed, dt, animate = true) {
+function stepTowards(agent, tx, ty, speed, dt, world, constrained = false) {
   const dx = tx - agent.x;
   const dy = ty - agent.y;
   const d = Math.hypot(dx, dy);
@@ -61,19 +63,23 @@ function stepTowards(agent, tx, ty, speed, dt, animate = true) {
     agent.y = ty;
     return true;
   }
-  const move = speed * dt;
-  if (animate) {
-    faceTowards(agent, dx, dy);
-    agent.phase += dt * speed * 0.21;
+  const oldX = agent.x, oldY = agent.y;
+  const z = world.zAt?.(oldX, oldY) ?? 0;
+  const move = Math.min(speed * dt, d);
+  const next = world.crowd ? world.crowd.move(agent, tx, ty, move, dt, constrained) :
+    { x: oldX + dx / d * move, y: oldY + dy / d * move };
+  agent.x = next.x; agent.y = next.y;
+  const travelled = Math.hypot(agent.x - oldX, agent.y - oldY);
+  if (travelled > .001) {
+    const P = world.P;
+    const px = P ? P.X(agent.x, agent.y) - P.X(oldX, oldY) : agent.x - oldX;
+    const py = P ? P.Y(agent.y, world.zAt?.(agent.x, agent.y) ?? 0) - P.Y(oldY, z) : agent.y - oldY;
+    agent.dir = travelFacing(px, py);
+    agent.phase += travelled * .21;
+  } else {
+    agent.mode = 'stand';
   }
-  if (move >= d) {
-    agent.x = tx;
-    agent.y = ty;
-    return true;
-  }
-  agent.x += (dx / d) * move;
-  agent.y += (dy / d) * move;
-  return false;
+  return Math.hypot(tx - agent.x, ty - agent.y) <= ARRIVE_EPS;
 }
 
 // ------------------------------------------------------------ task choice
@@ -138,8 +144,13 @@ export function planPath(agent, world, goalNode, finalPoint = null) {
       if (vertical) jx = lane;
       else jy = lane;
     } else if (!node.exact && !(edgeIn?.queue || edgeOut?.queue)) {
-      jx = rng.range(-13, 13);
-      jy = rng.range(-10, 10);
+      jx = rng.range(-8, 8);
+      jy = rng.range(-6, 6);
+      const previous = steps.at(-1) ?? agent;
+      const next = nav.nodes[ids[Math.min(i + 1, ids.length - 1)]];
+      if (world.blockers?.some(b => pointInRect(node.x + jx, node.y + jy, b) ||
+        (!pointInRect(previous.x, previous.y, b, 1) && segmentIntersectsRect(previous.x, previous.y, node.x + jx, node.y + jy, b)) ||
+        segmentIntersectsRect(node.x + jx, node.y + jy, next.x, next.y, b))) { jx = 0; jy = 0; }
     }
     steps.push({ x: node.x + jx, y: node.y + jy, node: node.id, edge: edgeIn });
   }
@@ -163,10 +174,10 @@ function startTask(agent, world) {
   if (roll < 0.72) {
     const poi = choosePoi(agent, world);
     if (poi) {
-      if (!poi.queue) poi.occupants++;
+      if (!poi.queue) { poi.occupants++; poi.reserve?.(agent); }
       agent.task = { type: poi.queue ? 'queue' : 'poi', poi };
-      if (planPath(agent, world, poi.node, { x: poi.x, y: poi.y })) return;
-      if (!poi.queue) poi.occupants--;
+      if (planPath(agent, world, poi.node, poi.entry?.(agent) ?? { x: poi.x, y: poi.y })) return;
+      if (!poi.queue) { poi.occupants--; poi.release?.(agent); }
     }
   }
   agent.task = { type: 'roam' };
@@ -189,6 +200,7 @@ function arrive(agent, world) {
     agent.dir = poi.facing ?? agent.dir;
     agent.action = poi.actions?.length ? rng.pick(poi.actions) : null;
     agent.sortBias = poi.sortBias ?? 0;
+    poi.onArrive?.(agent, world);
     return;
   }
   if (task?.type === 'queue') {
@@ -213,6 +225,15 @@ function arrive(agent, world) {
 function travel(agent, world, dt) {
   const step = agent.path[agent.pathIndex];
   const edge = step.edge;
+  const next = agent.path[agent.pathIndex + 1];
+  const ordinary = !step.final && !world.nav?.nodes[step.node]?.exact && (!edge || edge.type === 'walk') && !edge?.queue && (!next?.edge || next.edge.type === 'walk') && !next?.edge?.queue;
+  // Graph vertices are waypoints, not single-file appointments. Cut only a visible, clear corner.
+  if (ordinary && Math.hypot(step.x - agent.x, step.y - agent.y) < 16 &&
+      (!next || !world.blockers?.some(b => segmentIntersectsRect(agent.x, agent.y, next.x, next.y, b)))) {
+    agent.nodeId = step.node; agent.pathIndex++;
+    if (agent.pathIndex >= agent.path.length) arrive(agent, world);
+    return;
+  }
   if (edge?.queue && agent.passedQueue !== edge) {
     agent.state = 'queue';
     agent.queue = edge.queue;
@@ -231,7 +252,7 @@ function travel(agent, world, dt) {
   }
   agent.mode = mode;
   agent.action = mode === 'walk' && agent.look.carry?.type === 'phone' && agent.id % 5 === 0 ? 'phone' : null;
-  if (stepTowards(agent, step.x, step.y, speed, dt, true)) {
+  if (stepTowards(agent, step.x, step.y, speed, dt, world, !!edge && edge.type !== 'walk')) {
     if (!step.final) agent.nodeId = step.node;
     if (edge?.queue) agent.passedQueue = null;
     agent.pathIndex++;
@@ -241,10 +262,16 @@ function travel(agent, world, dt) {
 
 function inQueue(agent, world, dt) {
   const q = agent.queue;
+  agent.queueWait = (agent.queueWait ?? 0) + dt;
+  if (q.maxWait && agent.queueWait > q.maxWait) {
+    q.leave(agent); agent.queue = null; agent.queueWait = 0; agent.atFront = false;
+    agent.state = 'idle'; agent.timer = .2; agent.task = null;
+    return;
+  }
   const index = q.indexOf(agent);
   if (index < 0) return;
   const slot = q.slotPosition(index);
-  const reached = stepTowards(agent, slot.x, slot.y, agent.walkSpeed * 0.75, dt, true);
+  const reached = stepTowards(agent, slot.x, slot.y, agent.walkSpeed * 0.75, dt, world, true);
   if (reached) {
     agent.mode = 'stand';
     agent.dir = q.facing;
@@ -259,6 +286,7 @@ function inQueue(agent, world, dt) {
 export function servedByQueue(agent, world) {
   const q = agent.queue;
   agent.queue = null;
+  agent.queueWait = 0;
   agent.atFront = false;
   agent.action = null;
   if (agent.queueResume) {
@@ -268,7 +296,7 @@ export function servedByQueue(agent, world) {
     return;
   }
   const poi = agent.task?.poi;
-  poi?.onServed?.(agent, world);
+  if (poi?.onServed?.(agent, world) === true) return;
   if (poi?.exitNode >= 0) agent.nodeId = poi.exitNode;
   agent.state = 'idle';
   agent.timer = world.rng.range(0.2, 1);
@@ -276,6 +304,7 @@ export function servedByQueue(agent, world) {
 }
 
 export function updateAgent(agent, world, dt) {
+  if (agent.state !== 'travel' && agent.state !== 'queue') { agent.vx = 0; agent.vy = 0; }
   switch (agent.state) {
     case 'idle':
       agent.mode = 'stand';
@@ -299,6 +328,9 @@ export function updateAgent(agent, world, dt) {
     case 'queue':
       inQueue(agent, world, dt);
       break;
+    case 'visit':
+      updateVisit(agent, world, dt);
+      break;
     case 'fixed':
       agent.timer -= dt;
       if (agent.timer <= 0 && agent.fixedActions) {
@@ -313,15 +345,62 @@ export function updateAgent(agent, world, dt) {
   agent.z = world.zAt ? world.zAt(agent.x, agent.y) : 0;
 }
 
+/** A finite, reserved interior visit. Search targets never enter hidden interiors. */
+export function startVisit(agent, world, { enter, exit, duration, controller, returnAt = null, onUse = null, onComplete = null }) {
+  if (agent.isWiggles) throw new Error('Mr. Wiggles cannot enter an off-scene activity');
+  agent.state = 'visit';
+  agent.mode = 'walk'; agent.action = null;
+  agent.visit = { phase: 'enter', points: enter, index: 0, exit, timer: duration, controller, returnAt, onUse, onComplete, elapsed: 0 };
+  controller?.inside.add(agent.id);
+  void world;
+}
+
+function updateVisit(agent, world, dt) {
+  const v = agent.visit;
+  v.elapsed += dt;
+  if (v.phase === 'use') {
+    agent.mode = 'sit'; agent.hidden = true;
+    v.timer -= dt;
+    if (v.timer > 0) return;
+    let reentry;
+    if (v.returnAt) {
+      reentry = (Array.isArray(v.returnAt) ? v.returnAt : [v.returnAt]).find(p => !world.crowd || world.crowd.canPlace(agent, p.x, p.y));
+      if (!reentry) return;
+      agent.x = reentry.x; agent.y = reentry.y;
+      agent.nodeId = world.nav.nearest(agent.x, agent.y);
+    }
+    v.phase = 'exit'; v.points = reentry?.exit ? [reentry.exit] : v.exit; v.index = 0;
+    agent.hidden = false;
+  }
+  const point = v.points[v.index];
+  agent.mode = 'walk';
+  if (point && !stepTowards(agent, point.x, point.y, agent.walkSpeed * .75, dt, world, true)) return;
+  v.index++;
+  if (v.index < v.points.length) return;
+  if (v.phase === 'enter') {
+    v.phase = 'use'; agent.hidden = true;
+    v.onUse?.(agent, world);
+  } else {
+    v.controller?.inside.delete(agent.id);
+    if (v.controller) v.controller.completed++;
+    const poi = agent.poi ?? agent.task?.poi;
+    if (poi && !poi.queue) { poi.occupants = Math.max(0, poi.occupants - 1); poi.release?.(agent); }
+    v.onComplete?.(agent, world);
+    agent.visit = null; agent.poi = null; agent.task = null;
+    agent.hidden = false; agent.sortBias = 0; agent.state = 'idle'; agent.timer = 1;
+    agent.nodeId = world.nav.nearest(agent.x, agent.y, { filter: n => !n.exact && !n.hidden });
+  }
+}
+
 export function agentPose(agent, t) {
-  return { dir: agent.dir, mode: agent.mode, phase: agent.phase, t: agent.poseTime ?? t, action: agent.action, seed: agent.seed };
+  return { dir: agent.dir, mode: agent.mode, phase: agent.phase, t, action: agent.action, seed: agent.seed };
 }
 
 /** Picture-space bounding box covering the head, hat and held items. */
 export function agentBounds(agent, P) {
-  const s = (agent.look.height / 40) * P.s(agent.y);
-  const top = agent.look.hat ? 52 : 44;
+  const s = P.s(agent.y);
+  const bounds = spriteBounds(agent.look);
   const px = P.X(agent.x, agent.y);
   const py = P.Y(agent.y, agent.z ?? 0);
-  return { x: px - 10 * s, y: py - top * s, w: 20 * s, h: top * s + 2 * s };
+  return { x: px + bounds.L * s, y: py + bounds.T * s, w: (bounds.R - bounds.L) * s, h: (bounds.B - bounds.T) * s };
 }
